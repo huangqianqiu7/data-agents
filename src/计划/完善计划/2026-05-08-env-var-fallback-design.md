@@ -144,3 +144,26 @@ dataclass 默认"的兜底路径成立（且不抛错）。
       的 PowerShell session 下成功运行（无 `agent.api_*` 字段也能跑通）
 - [ ] README 快速上手小节增加 env-var 说明，4 行以内
 - [ ] 不抛新的 `ConfigError` 错误码，不影响调用方 try/except 链路
+
+---
+
+## 八、2026-05-09 后续（统一配置参数 v4）
+
+详见同目录上级新文件 `../统一配置/2026-05-09-统一配置参数-design-v4.md`。
+关键演进：
+
+1. **删除 `DABENCH_*` env 协议**：`submission.py` 顶部 `DEFAULT_MAX_WORKERS` /
+   `DEFAULT_TASK_TIMEOUT_SECONDS` / `DEFAULT_MODEL_NAME` 三常量与 `_int_from_env`
+   一并移除；本地与容器使用同一份 `RunConfig` / `AgentConfig` dataclass 默认。
+2. **`MODEL_NAME` 升为容器必填**（D1）：与 `MODEL_API_URL` 同级硬约束，
+   缺失抛 `SubmissionConfigError("Missing required environment variable:
+   MODEL_NAME")`，避免容器静默 fallback 到 `qwen3.5-35b-a3b`。
+3. **`AgentConfig.model` 默认保持 `gpt-4.1-mini`**：本设计文档第 45 / 74 / 115 行
+   关于 dataclass 默认值的描述**仍正确**，无需修订。
+4. **本地路径 env 兜底协议保持不变**：`load_app_config` 的
+   `_overlay_agent_env_vars` / YAML > env > dataclass 默认三层优先级**未变**。
+   2026-05-09 v4 仅收紧容器路径行为。
+
+测试影响：`tests/test_phase5_config.py` 4 条测试不变；新增
+`tests/test_submission_config.py::V5a / V5b / V6` + `test_submission_runtime.py::V7`
++ `test_submission_meta.py::__all__ 防回归` 共 5 条断言守护.
