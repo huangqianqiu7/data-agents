@@ -1,0 +1,63 @@
+# v5 §二.7 完整排除清单。
+#
+# 控制目标：
+#   1. 镜像体积 < 2 GB（必须 < 10 GB）。
+#   2. 不把任何敏感配置 / 测试数据 / 归档代码 / 历史 artifacts 带进镜像。
+#   3. 提交态 gateway_caps.yaml 来自 docker/gateway_caps.yaml，不从
+#      artifacts/gateway_caps.yaml 复制（避免被 dev 态 gateway-smoke 覆盖）。
+#
+# 任何被这里排除的路径都不应该在 Dockerfile 里被 COPY；当前 Dockerfile
+# 只显式 COPY pyproject.toml / README.md / src/data_agent_langchain /
+# docker/gateway_caps.yaml 四项，与本清单一致。
+
+# --- 凭据 / 个人配置 ---
+.env
+.env.local
+.env.*.local
+.codex
+.git/
+.gitignore
+.vscode/
+configs/
+
+# --- 大体积本地数据 / 评测产物 / 归档 ---
+data/
+old/
+Comparison/
+artifacts/
+evaluation/
+evaluation_report.csv
+
+# --- 测试 / 离线对比脚本 ---
+tests/
+test_api.py
+test_bench_comparison.py
+src/test_react_parsers.py
+
+# --- 归档代码与迁移文档（不参与运行时） ---
+src/废弃/
+src/LangChain/
+src/完善计划/
+
+# --- 开发态缓存 / 编辑器临时文件 ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+__MACOSX/
+**/__pycache__/
+**/.ipynb_checkpoints/
+
+# --- 归档包与备份 ---
+*.tar.gz
+*.tar
+*.zip
+*.bak
+*.swp
+*.tmp
+
+# --- 操作系统噪声 ---
+.DS_Store
+Thumbs.db

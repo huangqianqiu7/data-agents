@@ -1,0 +1,75 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+# v5 §二.8.4：distribution name 改为 data-agent-langchain，与实际打包目标
+# 一致；老的 data_agent_baseline 已归档到 src/废弃/，不再参与镜像构建。
+name = "data-agent-langchain"
+version = "0.1.0"
+description = "LangGraph backend for the DABench data-agent benchmark (KDD Cup 2026)"
+readme = "README.md"
+# v5 §二.1 / §四第 0 步：base image 是 python:3.13-slim-bookworm，与 dataagent
+# dev 环境（3.13.12）完全对齐。dev 实测最低 3.13.x 即可，但同时保留向后
+# 兼容老 dev 环境的 3.10+ 入口（pyproject 不强制 3.13）。
+requires-python = ">=3.10"
+# v5 §二.8.1：主依赖 = data_agent_langchain 实际运行最小集，固定版本范围。
+# 实测版本与下界对应 dataagent 环境（2026-05-08）。上界遵循 SemVer 同 minor。
+# 任何 baseline 专属大包（datasets / duckdb / huggingface-hub / openpyxl /
+# polars / pyarrow / rich）都已下放到 [project.optional-dependencies].baseline。
+dependencies = [
+    "langchain-core>=0.3.84,<0.4",
+    "langchain-openai>=0.3.35,<0.4",
+    "langgraph>=0.4.10,<0.5",
+    "openai>=2.31,<3",
+    "pandas>=3.0,<4",
+    "pydantic>=2.12,<3",
+    "pyyaml>=6.0.3,<7",
+    "typer>=0.24,<1",
+    "numpy>=2.4,<3",
+]
+
+[project.optional-dependencies]
+# 旧 baseline backend（src/废弃/data_agent_baseline）才需要这些大包。
+# 提交镜像不安装此组；只有本地 parity / 历史回归测试需要时再 pip install ".[baseline]"。
+baseline = [
+    "datasets>=3.3.2",
+    "duckdb>=1.5.0",
+    "huggingface-hub>=0.29.3",
+    "openpyxl>=3.1.5",
+    "polars>=1.39.0",
+    "pyarrow>=23.0.1",
+    "rich>=13.9.4",
+]
+dev = [
+    "pytest>=8.3.5",
+    "ruff>=0.11.0",
+]
+
+[project.scripts]
+# v5 §二.8.4：删除过期 dabench entry point（指向已归档 baseline 包，会
+# ImportError）；只保留 langchain backend 的 dabench-lc。
+dabench-lc = "data_agent_langchain.cli:main"
+
+[tool.hatch.build.targets.wheel]
+# v5 §二.1：显式指定 wheel 打包目录，避免 hatchling 自动发现误打到归档目录。
+packages = ["src/data_agent_langchain"]
+
+[tool.hatch.build.targets.sdist]
+# sdist 也只包含 langchain backend + 提交态资产；不带归档代码 / 大数据 / 测试。
+include = [
+    "src/data_agent_langchain",
+    "docker/gateway_caps.yaml",
+    "Dockerfile",
+    ".dockerignore",
+    "pyproject.toml",
+    "README.md",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

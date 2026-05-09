@@ -1,0 +1,22 @@
+# v5 §二.2：提交态网关能力快照。
+#
+# - 固定打入镜像 /app/gateway_caps.yaml。
+# - 提交入口构造 AppConfig 时强制设置：
+#     ObservabilityConfig(gateway_caps_path=Path("/app/gateway_caps.yaml"))
+# - 不从开发态 artifacts/gateway_caps.yaml 复制，避免被 dev 态
+#   `dabench-lc gateway-smoke` 覆盖。
+# - tool_calling=true 是 runner 启动校验的硬性要求；缺这一项会让
+#   GatewayCaps.from_yaml 返回的 caps.tool_calling=False，进而让
+#   _llm_for_action_mode 抛 ConfigError，全批 0 题。
+#
+# 字段语义：
+#   tool_calling          ：是否支持 OpenAI 风格 bind_tools。
+#   parallel_tool_calls   ：true=支持一次响应多 tool_call（langchain-openai
+#                            会传 parallel_tool_calls 字段）。
+#   seed_param            ：网关是否真接受 seed=...（用于 reproducible 模式）。
+#   strict_mode           ：OpenAI strict mode 是否真生效。
+gateway_caps:
+  tool_calling: true
+  parallel_tool_calls: true
+  seed_param: true
+  strict_mode: true
