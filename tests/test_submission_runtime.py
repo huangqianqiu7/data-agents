@@ -84,6 +84,7 @@ def test_missing_gateway_caps_yaml_fails_fast(tmp_path: Path, monkeypatch):
     from data_agent_langchain import submission
 
     monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
     dirs = _submission_dirs(tmp_path)
     dirs["input_dir"].mkdir()
     _make_task(dirs["input_dir"], "task_1")
@@ -105,6 +106,7 @@ def test_caps_file_with_tool_calling_true_proceeds(tmp_path: Path, monkeypatch):
     from data_agent_langchain import submission
 
     monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
     dirs = _submission_dirs(tmp_path)
     dirs["input_dir"].mkdir()
     _make_task(dirs["input_dir"], "task_1")
@@ -127,6 +129,7 @@ def test_each_task_starts_with_placeholder_csv(tmp_path: Path, monkeypatch):
     from data_agent_langchain import submission
 
     monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
     dirs = _submission_dirs(tmp_path)
     dirs["input_dir"].mkdir()
     _make_task(dirs["input_dir"], "task_1")
@@ -154,6 +157,7 @@ def test_success_overwrites_placeholder_atomically(tmp_path: Path, monkeypatch):
     from data_agent_langchain import submission
 
     monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
     dirs = _submission_dirs(tmp_path)
     dirs["input_dir"].mkdir()
     _make_task(dirs["input_dir"], "task_1")
@@ -184,6 +188,7 @@ def test_failed_task_keeps_placeholder_csv(tmp_path: Path, monkeypatch):
     from data_agent_langchain import submission
 
     monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
     dirs = _submission_dirs(tmp_path)
     dirs["input_dir"].mkdir()
     _make_task(dirs["input_dir"], "task_1")
@@ -221,6 +226,7 @@ def test_no_run_id_directory_under_output(tmp_path: Path, monkeypatch):
     from data_agent_langchain import submission
 
     monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
     dirs = _submission_dirs(tmp_path)
     dirs["input_dir"].mkdir()
     _make_task(dirs["input_dir"], "task_1")
@@ -249,6 +255,7 @@ def test_per_task_failure_does_not_block_other_tasks(tmp_path: Path, monkeypatch
     from data_agent_langchain import submission
 
     monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
     dirs = _submission_dirs(tmp_path)
     dirs["input_dir"].mkdir()
     _make_task(dirs["input_dir"], "task_1")
@@ -305,6 +312,7 @@ def test_sigterm_stops_dispatching_new_tasks(tmp_path: Path, monkeypatch):
     from data_agent_langchain import submission
 
     monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
     dirs = _submission_dirs(tmp_path)
     dirs["input_dir"].mkdir()
     for index in range(1, 6):
@@ -335,7 +343,8 @@ def test_sigterm_stops_dispatching_new_tasks(tmp_path: Path, monkeypatch):
 
     submission._shutting_down.clear()
     monkeypatch.setattr(submission, "_run_single_task_impl", _fake_impl)
-    monkeypatch.setattr(submission, "DEFAULT_MAX_WORKERS", 1, raising=False)
+    # 2026-05-09 v4 §5 / O1：``DEFAULT_MAX_WORKERS`` 常量已删；
+    # 本测试并发数由 ``max_workers=1`` 形参（line 下方）进行控制。
 
     summary = submission.run(
         **dirs,
@@ -364,6 +373,7 @@ def test_no_secrets_or_observations_leak_to_logs_or_outputs(tmp_path: Path, monk
     from data_agent_langchain import submission
 
     monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
     monkeypatch.setenv("MODEL_API_KEY", _MOCK_API_KEY)
     dirs = _submission_dirs(tmp_path)
     dirs["input_dir"].mkdir()
@@ -406,6 +416,7 @@ def test_none_in_answer_rows_writes_empty_cell(tmp_path: Path, monkeypatch):
     from data_agent_langchain import submission
 
     monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
     dirs = _submission_dirs(tmp_path)
     dirs["input_dir"].mkdir()
     _make_task(dirs["input_dir"], "task_1")
@@ -440,3 +451,60 @@ def test_none_in_answer_rows_writes_empty_cell(tmp_path: Path, monkeypatch):
     assert "None" not in text, f"None leaked as string in CSV: {text!r}"
     rows = list(csv.reader(text.splitlines()))
     assert rows == [["id", "name"], ["1", ""], ["2", "alice"]]
+
+
+# ---------------------------------------------------------------------------
+# 2026-05-09 v4 §6 V7：不传 llm 时 ``task_timeout_seconds`` 走 RunConfig 默认
+# ---------------------------------------------------------------------------
+
+def test_default_run_uses_runconfig_defaults_without_llm(tmp_path: Path, monkeypatch):
+    """v4 V7（D3）：``run(llm=None, ...)`` 时 summary 里的
+    ``task_timeout_seconds`` / ``max_workers`` 走 ``RunConfig`` 默认。
+
+    M5 关键点：``monkeypatch.setattr(submission, "_run_single_task_impl", ...)``
+    避免真实 LLM 构造 + 600s timeout 拖慢 CI。
+    """
+    from data_agent_langchain import submission
+    from data_agent_langchain.config import RunConfig
+
+    monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+
+    def _fake_impl(*, task_id: str, config: AppConfig, run_output_dir: Path,
+                   llm: Any, graph_mode: str) -> TaskRunArtifacts:
+        # 模板源自 tests/test_submission_runtime.py:259-277
+        task_output_dir = run_output_dir / task_id
+        task_output_dir.mkdir(parents=True, exist_ok=True)
+        prediction_csv = task_output_dir / "prediction.csv"
+        with prediction_csv.open("w", newline="", encoding="utf-8") as handle:
+            csv.writer(handle).writerows([["id"], [1]])
+        trace_path = task_output_dir / "trace.json"
+        trace_path.write_text("{}", encoding="utf-8")
+        return TaskRunArtifacts(
+            task_id=task_id,
+            task_output_dir=task_output_dir,
+            prediction_csv_path=prediction_csv,
+            trace_path=trace_path,
+            succeeded=True,
+            failure_reason=None,
+        )
+
+    monkeypatch.setattr(submission, "_run_single_task_impl", _fake_impl)
+    dirs = _submission_dirs(tmp_path)
+    dirs["input_dir"].mkdir()
+    _make_task(dirs["input_dir"], "task_1")
+    _make_caps(dirs["gateway_caps_path"])
+
+    summary = submission.run(
+        **dirs,
+        register_signals=False,
+        llm=None,  # 不传 llm 走 ``RunConfig`` 默认 timeout
+        max_workers=1,  # 避免多线程；dataclass 默认 5 在 tmp 单 task 下也可，但 1 更快
+        action_mode_override="json_action",
+    )
+
+    assert summary["task_timeout_seconds"] == RunConfig().task_timeout_seconds
+    # 本测试显式传 max_workers=1，所以只能断言 effective 值 == 1
+    # 不传 max_workers 时走 RunConfig 默认的路径被 V5a 覆盖
+    assert summary["max_workers"] == 1

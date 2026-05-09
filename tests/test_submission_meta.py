@@ -100,3 +100,27 @@ def test_task_json_missing_required_key_raises_dataset_error(tmp_path: Path):
     dataset = DABenchPublicDataset(tmp_path)
     with pytest.raises(DatasetError):
         dataset.get_task("task_1")
+
+
+# ---------------------------------------------------------------------------
+# 2026-05-09 v4 §5：``submission.__all__`` 防回归
+# ---------------------------------------------------------------------------
+
+def test_submission_all_no_default_constants():
+    """v4 §5：``submission.__all__`` 不再含 ``DEFAULT_MAX_WORKERS`` /
+    ``DEFAULT_TASK_TIMEOUT_SECONDS`` / ``DEFAULT_MODEL_NAME``。
+
+    防止统一配置参数收敛之后有人重新引入这三个常量并通过 ``__all__``
+    暴露出去，让本地 / 容器默认值再次漂移。
+    """
+    from data_agent_langchain import submission
+
+    forbidden = {
+        "DEFAULT_MAX_WORKERS",
+        "DEFAULT_TASK_TIMEOUT_SECONDS",
+        "DEFAULT_MODEL_NAME",
+    }
+    overlap = forbidden & set(submission.__all__)
+    assert not overlap, (
+        f"submission.__all__ exports forbidden default constants: {sorted(overlap)}"
+    )
