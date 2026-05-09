@@ -23,16 +23,22 @@ htmlcov/
 .codex
 
 # Local data, docs, tests, and artifacts
-# data/
+data/
 docs/
 # tests/  # 暂解除以便 Cascade 在 v5 计划下读取/编辑测试（TDD 用）
 evaluation/
+evaluation_report.csv
 # artifacts/*
 !artifacts/.gitkeep
 
 # Local configs
-configs/*
-!configs/react_baseline.example.yaml
+configs/
+
+# Local IDE and smoke-test files
+.vscode/
+test_api.py
+team1221_v1.tar
+team1221_v1.tar.gz
 
 # OS / notebook noise
 .DS_Store
