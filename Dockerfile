@@ -33,5 +33,5 @@ COPY docker/gateway_caps.yaml /app/gateway_caps.yaml
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# 提交态严禁交互输入。所有配置走 MODEL_* / DABENCH_* 环境变量。
+# 提交态严禁交互输入。所有配置走 MODEL_* 环境变量。
 ENTRYPOINT ["python", "-m", "data_agent_langchain.submission"]

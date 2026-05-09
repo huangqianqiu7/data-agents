@@ -178,7 +178,13 @@ $env:MODEL_NAME    = "<你的 model 名，例如 qwen3.5-35b-a3b>"
 YAML 中 `agent.model` / `api_base` / `api_key` 留空 / 不写时，自动从对应
 `MODEL_NAME` / `MODEL_API_URL` / `MODEL_API_KEY` env vars 兜底；
 **YAML 显式非空值则胜出**（用于本地 mock gateway 调试时覆盖）。详见
-`src/完善计划/2026-05-08-env-var-fallback-design.md`。
+`src/计划/完善计划/2026-05-08-env-var-fallback-design.md`。
+
+> **2026-05-09 v4 D1**：容器路径下 `MODEL_NAME` 与 `MODEL_API_URL` 同为
+> 必填 env，缺失抛 `SubmissionConfigError`；`MODEL_API_KEY` 缺失回退
+> `EMPTY`。本地路径仍允许三者全部缺失，落到 `AgentConfig` dataclass
+> 默认。详见 `src/计划/统一配置/2026-05-09-统一配置参数-design-v4.md`
+> §4.1 / §4.2。
 
 ### 3. 准备 `gateway_caps.yaml`
 
@@ -230,7 +236,7 @@ dabench-lc run-benchmark --config configs/react_baseline.example.yaml --limit 10
 | `DatasetConfig` | `root_path` | 数据集根路径；图节点只看到字符串副本 |
 | `ToolsConfig` | `python_timeout_s=30.0` / `sql_row_limit=200` | `execute_python` 沙箱超时、SQL 默认行数上限 |
 | `AgentConfig` | `model` / `api_base` / `api_key` / `temperature` / `max_steps=20` / `max_replans=2` / `max_gate_retries=2` / `action_mode="tool_calling"` / `model_timeout_s=120` / `tool_timeout_s=180` / `max_obs_chars=3000` / `max_context_tokens=24000` / `seed` 等 | 主循环、超时、上下文预算、决定性 |
-| `RunConfig` | `output_dir` / `run_id` / `max_workers=4` / `task_timeout_seconds=600` | runner 与子进程参数 |
+| `RunConfig` | `output_dir` / `run_id` / `max_workers=5` / `task_timeout_seconds=600` | runner 与子进程参数 |
 | `ObservabilityConfig` | `langsmith_enabled=False` / `gateway_caps_path` | LangSmith 与 caps 文件位置 |
 | `EvaluationConfig` | `reproducible=False` | `reproducible=true` 时强制 `agent.seed` 已设并禁 LangSmith（v4 E5） |
 
