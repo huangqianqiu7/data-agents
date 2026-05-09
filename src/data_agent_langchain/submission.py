@@ -7,8 +7,8 @@
   2. 校验 ``/input`` 存在 + ``/output`` 可写。
   3. 主线程注册 SIGTERM handler。
   4. 清理 LangSmith 相关环境变量（防御性）。
-  5. 从 ``MODEL_*`` / ``DABENCH_*`` 直接构造 ``AppConfig``，固定
-     ``graph_mode="plan_solve"``。
+  5. 从 ``MODEL_*`` env 构造 ``AppConfig``，其它字段走 ``config.py`` dataclass
+     默认；固定 ``graph_mode="plan_solve"``。
   6. 校验 ``/app/gateway_caps.yaml`` 存在且 ``tool_calling=true``。
   7. 枚举 ``/input`` 下所有 ``task_*`` 目录。
   8. 每题先写占位 CSV ``result\\r\\n`` 到 ``/output/<task_id>/prediction.csv``。
@@ -44,10 +44,8 @@ from data_agent_langchain.config import (
     AgentConfig,
     AppConfig,
     DatasetConfig,
-    EvaluationConfig,
     ObservabilityConfig,
     RunConfig,
-    ToolsConfig,
 )
 from data_agent_langchain.exceptions import DataAgentError
 from data_agent_langchain.run.runner import TaskRunArtifacts, run_single_task
@@ -65,10 +63,6 @@ DEFAULT_LOGS_DIR: Path = Path("/logs")
 DEFAULT_INTERNAL_RUNS_DIR: Path = Path("/tmp/dabench-runs")
 DEFAULT_GATEWAY_CAPS_PATH: Path = Path("/app/gateway_caps.yaml")
 
-DEFAULT_MAX_WORKERS: int = 5
-DEFAULT_TASK_TIMEOUT_SECONDS: int = 600
-
-DEFAULT_MODEL_NAME: str = "qwen3.5-35b-a3b"
 EMPTY_API_KEY: str = "EMPTY"
 
 PLACEHOLDER_CSV: bytes = b"result\r\n"
@@ -118,21 +112,26 @@ class SubmissionConfigError(DataAgentError):
 # ---------------------------------------------------------------------------
 
 def build_submission_config() -> AppConfig:
-    """从环境变量构造 ``AppConfig``，绝不读 YAML。
+    """从 ``MODEL_*`` env 构造 ``AppConfig``，其它字段走 dataclass 默认，绝不读 YAML。
 
-    必填：
-      - ``MODEL_API_URL``：缺失时抛 :class:`SubmissionConfigError`，
-        错误信息只含 env 名，不透露任何 URL / key 值。
+    必填 env（缺失任意一个都招 :class:`SubmissionConfigError`，错误信息
+    只含 env 名，不透露任何 URL / key / model 值）：
 
-    可选：
-      - ``MODEL_API_KEY``：缺失回退 ``"EMPTY"``。
-      - ``MODEL_NAME``：缺失回退 ``"qwen3.5-35b-a3b"``。
+      - ``MODEL_API_URL``
+      - ``MODEL_NAME``。2026-05-09 v4 §4.1 D1：与 ``MODEL_API_URL`` 同级硬约束，
+        避免容器静默 fallback 到 "qwen3.5-35b-a3b" 导致身份漂移。
 
-    强约束：
+    可选 env：
+      - ``MODEL_API_KEY``：缺失回退 ``"EMPTY"``（网关 LLM 哨兵值）。
+
+    容器特化路径（与本地 ``load_app_config`` 合法差异的 3 个字段）：
       - ``dataset.root_path = /input``
       - ``run.output_dir = /tmp/dabench-runs``（内部目录）
       - ``observability.gateway_caps_path = /app/gateway_caps.yaml``
-      - ``observability.langsmith_enabled = False``
+
+    其它所有字段（``max_workers`` / ``task_timeout_seconds`` /
+    ``action_mode`` / ``langsmith_enabled`` / ``reproducible`` / …）均走
+    ``config.py`` dataclass 默认，本地与容器使用同一套参数。
     """
     api_url = os.environ.get("MODEL_API_URL")
     if not api_url:
@@ -140,13 +139,13 @@ def build_submission_config() -> AppConfig:
         raise SubmissionConfigError(
             "Missing required environment variable: MODEL_API_URL"
         )
+    model_name = os.environ.get("MODEL_NAME")
+    if not model_name:
+        # 2026-05-09 v4 §4.1 D1：与 MODEL_API_URL 同级硬约束
+        raise SubmissionConfigError(
+            "Missing required environment variable: MODEL_NAME"
+        )
     api_key = os.environ.get("MODEL_API_KEY") or EMPTY_API_KEY
-    model_name = os.environ.get("MODEL_NAME") or DEFAULT_MODEL_NAME
-
-    max_workers = _int_from_env("DABENCH_MAX_WORKERS", DEFAULT_MAX_WORKERS)
-    task_timeout = _int_from_env(
-        "DABENCH_TASK_TIMEOUT_SECONDS", DEFAULT_TASK_TIMEOUT_SECONDS
-    )
 
     return AppConfig(
         dataset=DatasetConfig(root_path=DEFAULT_INPUT_DIR),
@@ -154,31 +153,12 @@ def build_submission_config() -> AppConfig:
             model=model_name,
             api_base=api_url,
             api_key=api_key,
-            action_mode="tool_calling",
         ),
-        tools=ToolsConfig(),
-        run=RunConfig(
-            output_dir=DEFAULT_INTERNAL_RUNS_DIR,
-            max_workers=max_workers,
-            task_timeout_seconds=task_timeout,
-        ),
+        run=RunConfig(output_dir=DEFAULT_INTERNAL_RUNS_DIR),
         observability=ObservabilityConfig(
-            langsmith_enabled=False,
             gateway_caps_path=DEFAULT_GATEWAY_CAPS_PATH,
         ),
-        evaluation=EvaluationConfig(reproducible=False),
     )
-
-
-def _int_from_env(name: str, fallback: int) -> int:
-    raw = os.environ.get(name)
-    if not raw:
-        return fallback
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        logger.warning("Invalid integer env %s; falling back to default.", name)
-        return fallback
 
 
 def _scrub_langsmith_env() -> None:
@@ -556,10 +536,7 @@ __all__ = [
     "DEFAULT_INPUT_DIR",
     "DEFAULT_INTERNAL_RUNS_DIR",
     "DEFAULT_LOGS_DIR",
-    "DEFAULT_MAX_WORKERS",
-    "DEFAULT_MODEL_NAME",
     "DEFAULT_OUTPUT_DIR",
-    "DEFAULT_TASK_TIMEOUT_SECONDS",
     "EMPTY_API_KEY",
     "PLACEHOLDER_CSV",
     "PREDICTION_FILE_NAME",
