@@ -360,6 +360,14 @@ def gateway_smoke_command(
 
 
 def main() -> None:
+    # dev 便利：自动从 .env 加载 MODEL_* / SERPAPI_API_KEY 等环境变量。
+    # 容器路径走 submission.py:main()，不经此函数；python-dotenv 不在 runtime
+    # 依赖里，try-import 失败时静默跳过（§5.2 容器仅靠 env 协议不变）。
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
     app()
 
 
