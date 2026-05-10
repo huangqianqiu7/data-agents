@@ -50,17 +50,31 @@ def call_model_with_retry(
     retry_backoff: tuple[float, ...],
     timeout_seconds: float,
     action_mode: str,
+    config: Any | None = None,
 ) -> str:
-    """带边界重试地执行 ``invoke(messages)``，与 legacy 行为对齐。
+    """带边界重试地执行 ``invoke(messages, config=config)``，与 legacy 行为对齐。
+
+    ``config`` 是 LangGraph 透传给本节点的 ``RunnableConfig``；本函数把它直接
+    转发给 ``invoke``，让 ``MetricsCollector.on_llm_end`` 等 callback 能正常
+    触发（详见 ``test_phase3_model.py::test_model_node_propagates_runnable_
+    config_to_llm_invoke``）。``config=None`` 时退化为 legacy ``invoke(messages)``。
 
     返回 ``raw_response`` 字符串，可直接交给 ``parse_action_node`` 消费。
     重试全部失败时抛 :class:`ModelExhaustedError`，调用方负责将其转为
     ``__error__`` StepRecord。
     """
+    invoke_kwargs: dict[str, Any] | None = (
+        {"config": config} if config is not None else None
+    )
     last_exc: BaseException | None = None
     for attempt in range(max_retries):
         try:
-            response = call_with_timeout(invoke, (messages,), timeout_seconds)
+            response = call_with_timeout(
+                invoke,
+                (messages,),
+                timeout_seconds,
+                kwargs=invoke_kwargs,
+            )
             return extract_raw_response(response, action_mode=action_mode)
         except (TimeoutError, RuntimeError, Exception) as exc:  # noqa: BLE001
             # 把 ``Exception`` 放在最后捕获，让 OpenAI / 网络错误也算可重试；

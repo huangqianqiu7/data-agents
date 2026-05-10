@@ -28,14 +28,23 @@ def call_with_timeout(
     fn: Callable[..., T],
     args: tuple[Any, ...],
     timeout_seconds: float,
+    *,
+    kwargs: dict[str, Any] | None = None,
 ) -> T:
-    """带硬超时地调用 ``fn(*args)``。与 legacy helper 同契约。"""
+    """带硬超时地调用 ``fn(*args, **kwargs)``。与 legacy helper 兼容。
+
+    新增的 ``kwargs`` 参数让调用方可以把 ``RunnableConfig`` 等关键参数透传给
+    ``llm.invoke``（callback 链路依赖这一点；详见 model_retry / planner_node
+    的回归测试 ``test_*_propagates_runnable_config_to_llm_invoke``）。
+    legacy 调用 ``call_with_timeout(fn, args, timeout)`` 仍按原行为工作。
+    """
     result_container: list[T | None] = [None]
     exception_container: list[BaseException | None] = [None]
+    call_kwargs = kwargs or {}
 
     def _wrapper() -> None:
         try:
-            result_container[0] = fn(*args)
+            result_container[0] = fn(*args, **call_kwargs)
         except Exception as exc:
             exception_container[0] = exc
 

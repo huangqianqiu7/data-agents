@@ -105,6 +105,9 @@ def model_node(state: RunState, config: Any | None = None) -> dict[str, Any]:
             retry_backoff=tuple(getattr(app_config.agent, "model_retry_backoff", (2.0, 5.0, 10.0))),
             timeout_seconds=float(getattr(app_config.agent, "model_timeout_s", 120.0)),
             action_mode=str(state.get("action_mode") or app_config.agent.action_mode),
+            # 把 LangGraph 透传给本节点的 RunnableConfig 继续向下游 LLM 转发，
+            # 否则 callbacks（含 MetricsCollector）链路会断，导致 metrics.tokens=0。
+            config=config,
         )
     except ModelExhaustedError as exc:
         return _model_error_update(state, cur_step, exc, config)

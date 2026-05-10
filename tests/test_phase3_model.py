@@ -19,6 +19,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from langchain_core.language_models import FakeListChatModel
@@ -217,5 +218,57 @@ def test_model_node_step_budget_exhausted_returns_max_steps_kind(synthetic_task,
     update = model_node(state, config={"configurable": {"llm": RunnableLambda(boom)}})
     assert update["step_index"] == 17
     assert update["last_error_kind"] == "max_steps_exceeded"
+
+
+# --- Callback propagation (token-usage bug regression) ----------------
+
+class _ConfigCapturingLLM:
+    """Captures the ``config=`` kwarg passed to ``invoke`` for assertions.
+
+    The token-usage bug (metrics.json tokens=0) was caused by ``model_node``
+    calling ``llm.invoke(messages)`` without forwarding the LangGraph
+    ``RunnableConfig``, which broke the ``MetricsCollector.on_llm_end``
+    callback chain. This test pins the contract: ``model_node`` MUST forward
+    its ``config`` argument to ``llm.invoke`` so callbacks (and any other
+    runtime metadata) propagate down to the underlying chat model.
+    """
+
+    def __init__(self) -> None:
+        self.captured_config: Any | None = None
+        self.captured_messages: Any | None = None
+
+    def invoke(self, messages, config=None, **_kwargs):
+        self.captured_config = config
+        self.captured_messages = messages
+        return AIMessage(
+            content='{"thought":"t","action":"answer","action_input":{"answer":"x"}}'
+        )
+
+
+def test_model_node_propagates_runnable_config_to_llm_invoke(synthetic_task, fast_app_config):
+    """Regression: ``model_node`` must forward its ``config`` to ``llm.invoke``.
+
+    Otherwise LangGraph-level callbacks (e.g. ``MetricsCollector``) never see
+    the ``on_llm_end`` event, and ``metrics.json`` ends up with ``tokens=0``.
+    """
+    llm = _ConfigCapturingLLM()
+    sentinel = object()
+    runtime_config = {
+        "configurable": {"llm": llm},
+        "callbacks": [sentinel],
+    }
+    model_node(_base_state(synthetic_task), config=runtime_config)
+
+    assert llm.captured_config is not None, (
+        "model_node did not forward config to llm.invoke; callbacks will not "
+        "propagate and MetricsCollector will record tokens=0."
+    )
+    forwarded_callbacks = llm.captured_config.get("callbacks") if isinstance(
+        llm.captured_config, dict
+    ) else None
+    assert forwarded_callbacks == [sentinel], (
+        f"Expected callbacks=[<sentinel>] forwarded to llm.invoke, "
+        f"got {forwarded_callbacks!r}"
+    )
 
 

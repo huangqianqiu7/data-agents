@@ -3,6 +3,7 @@
 import csv
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from langchain_core.language_models import FakeListChatModel
@@ -148,3 +149,53 @@ def test_replanner_node_records_sentinel_when_replan_fails(synthetic_task, fast_
     assert step.ok is False
     assert step.phase == "execution"
     assert "Re-plan failed:" in step.observation["error"]
+
+
+# --- Callback propagation (token-usage bug regression) ----------------
+
+class _ConfigCapturingLLM:
+    """Captures the ``config=`` kwarg passed to ``invoke`` for assertions.
+
+    See ``tests/test_phase3_model.py`` for the full bug context: the
+    metrics.json tokens=0 bug stemmed from ``model_node`` and ``planner_node``
+    calling ``llm.invoke(messages)`` without forwarding the LangGraph
+    ``RunnableConfig``, breaking the ``MetricsCollector.on_llm_end`` chain.
+    """
+
+    def __init__(self, plan_response: str = '```json\n{"plan":["List","Solve"]}\n```') -> None:
+        self.captured_config: Any | None = None
+        self.captured_messages: Any | None = None
+        self._plan_response = plan_response
+
+    def invoke(self, messages, config=None, **_kwargs):
+        self.captured_config = config
+        self.captured_messages = messages
+        return self._plan_response
+
+
+def test_planner_node_propagates_runnable_config_to_llm_invoke(synthetic_task, fast_app_config):
+    """Regression: ``planner_node`` must forward its ``config`` to ``llm.invoke``.
+
+    Same root cause as the model_node regression: without forwarding the
+    LangGraph ``RunnableConfig``, ``MetricsCollector`` never records the LLM
+    call performed during plan generation.
+    """
+    llm = _ConfigCapturingLLM()
+    sentinel = object()
+    runtime_config = {
+        "configurable": {"llm": llm},
+        "callbacks": [sentinel],
+    }
+    planner_node(_base_state(synthetic_task), config=runtime_config)
+
+    assert llm.captured_config is not None, (
+        "planner_node did not forward config to llm.invoke; callbacks will "
+        "not propagate and MetricsCollector will record tokens=0."
+    )
+    forwarded_callbacks = llm.captured_config.get("callbacks") if isinstance(
+        llm.captured_config, dict
+    ) else None
+    assert forwarded_callbacks == [sentinel], (
+        f"Expected callbacks=[<sentinel>] forwarded to llm.invoke, "
+        f"got {forwarded_callbacks!r}"
+    )

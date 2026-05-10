@@ -107,10 +107,18 @@ def _generate_plan_from_state(
     llm = _resolve_llm(config, app_config)
     task = rehydrate_task(state)
     messages = build_planning_messages(task, history_hint=history_hint)
+    # 把 LangGraph 透传给本节点的 RunnableConfig 继续向下游 LLM 转发，否则
+    # callbacks（含 MetricsCollector）链路会断，plan 阶段的 LLM token usage
+    # 不会进 metrics.json（详见 ``test_planner_node_propagates_runnable_
+    # config_to_llm_invoke``）。``config=None`` 时退化为 legacy 行为。
+    invoke_kwargs: dict[str, Any] | None = (
+        {"config": config} if config is not None else None
+    )
     response = call_with_timeout(
         llm.invoke,
         (messages,),
         float(getattr(app_config.agent, "model_timeout_s", 120.0)),
+        kwargs=invoke_kwargs,
     )
     raw = extract_raw_response(response, action_mode="json_action")
     return parse_plan(raw)
