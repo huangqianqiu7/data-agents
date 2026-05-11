@@ -306,3 +306,29 @@ def test_factory_returns_eight_tools_in_deterministic_order(tmp_path):
         # PrivateAttrs are accessed via ``_attr`` on the instance.
         assert tool._task is task
         assert tool._runtime.context_dir == str(task.context_dir)
+
+
+# ---------------------------------------------------------------------------
+# ExecutePythonInput schema hints (task_11 trace 改进, 方案一)
+# ---------------------------------------------------------------------------
+
+def test_execute_python_input_code_description_warns_about_extra_arguments():
+    """``ExecutePythonInput.code`` 的 ``Field.description`` 必须告诉模型：
+    整段代码留在 ``code`` 字符串里，不要把内层 dict 字面量的 key 拆出来
+    当成额外 tool 参数（否则会被 ``extra_forbidden`` 拒绝）。
+
+    回归源：artifacts/runs/20260510T090648Z/task_11/trace.json step 6/8 ——
+    模型在 tool_calling 模式下生成 code 字符串时，把 ``{'SEX': p['SEX'],
+    'Diagnosis': p['Diagnosis']}`` 的 key 误提到 args 顶层，触发 Pydantic
+    ``extra_forbidden`` 校验失败，浪费了 3 个 step。
+    """
+    from data_agent_langchain.tools.execute_python import ExecutePythonInput
+
+    desc = (ExecutePythonInput.model_fields["code"].description or "")
+    lower = desc.lower()
+    # 必须告诉模型整段 code 是单个字符串。
+    assert "single string" in lower, desc
+    # 必须明确提到 dict 字面量场景。
+    assert "dict" in lower, desc
+    # 必须点名 extra_forbidden 错误代号，让模型把 hint 与运行时错误对齐。
+    assert "extra_forbidden" in desc, desc

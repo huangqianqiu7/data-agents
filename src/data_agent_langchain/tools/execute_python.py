@@ -30,7 +30,12 @@ class ExecutePythonInput(BaseModel):
         description=(
             "Python source code to execute. The working directory is the task "
             "context root; ``context_root`` and ``Path`` are pre-injected into "
-            "globals."
+            "globals.\n\n"
+            "Pass the entire program as a SINGLE string in this `code` field. "
+            "Python dict literals like ``{'k': v}`` inside the code MUST stay "
+            "inside the string -- never split their keys out as additional "
+            "top-level tool arguments (they will be rejected as "
+            "`extra_forbidden`)."
         ),
     )
 

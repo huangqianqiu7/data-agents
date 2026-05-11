@@ -95,7 +95,7 @@ class AgentConfig:
     # ----- 主循环控制 -----
     max_steps: int = 60
     max_replans: int = 4
-    max_gate_retries: int = 6
+    max_gate_retries: int = 4
     require_data_preview_before_compute: bool = True
     progress: bool = False
 
