@@ -57,19 +57,18 @@ class JsonlMemoryStore:
         path = self._path(namespace)
         if not path.exists():
             return []
-        tombstoned: set[str] = set()
-        records: list[MemoryRecord] = []
+        active_by_id: dict[str, MemoryRecord] = {}
         for raw in path.read_text(encoding="utf-8").splitlines():
             if not raw.strip():
                 continue
             obj = json.loads(raw)
             if "_tombstone" in obj:
-                tombstoned.add(obj["_tombstone"])
+                active_by_id.pop(obj["_tombstone"], None)
                 continue
             rec = _record_from_json(raw)
             if rec is not None:
-                records.append(rec)
-        return [r for r in records if r.id not in tombstoned]
+                active_by_id[rec.id] = rec
+        return list(active_by_id.values())
 
     def get(self, namespace: str, record_id: str) -> MemoryRecord | None:
         latest: MemoryRecord | None = None
@@ -79,11 +78,9 @@ class JsonlMemoryStore:
         return latest
 
     def list(self, namespace: str, *, limit: int = 100) -> list[MemoryRecord]:
-        records = self._iter_active(namespace)
-        seen: dict[str, MemoryRecord] = {}
-        for rec in records:
-            seen[rec.id] = rec
-        ordered = sorted(seen.values(), key=lambda r: r.created_at, reverse=True)
+        ordered = sorted(
+            self._iter_active(namespace), key=lambda r: r.created_at, reverse=True
+        )
         return ordered[:limit]
 
     def delete(self, namespace: str, record_id: str) -> None:

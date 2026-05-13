@@ -87,4 +87,34 @@ def test_delete_writes_tombstone(tmp_path: Path):
         )
     )
     store.delete("dataset:ds", "a")
+    assert store.get("dataset:ds", "a") is None
     assert store.list("dataset:ds") == []
+
+
+def test_put_after_delete_reactivates_record(tmp_path: Path):
+    store = JsonlMemoryStore(root=tmp_path)
+    store.put(
+        MemoryRecord(
+            id="a",
+            namespace="dataset:ds",
+            kind="dataset_knowledge",
+            payload={"v": 1},
+        )
+    )
+    store.delete("dataset:ds", "a")
+    store.put(
+        MemoryRecord(
+            id="a",
+            namespace="dataset:ds",
+            kind="dataset_knowledge",
+            payload={"v": 2},
+        )
+    )
+
+    rec = store.get("dataset:ds", "a")
+    assert rec is not None
+    assert rec.payload["v"] == 2
+    results = store.list("dataset:ds")
+    assert len(results) == 1
+    assert results[0].id == "a"
+    assert results[0].payload["v"] == 2
