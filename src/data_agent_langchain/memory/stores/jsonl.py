@@ -1,23 +1,23 @@
 """Append-only JSONL MemoryStore implementation.
 
-Each namespace maps to one file. `_safe_filename` replaces `:`, `/`, and `\\`
-with `__` to avoid path traversal. Deletes are represented with tombstone rows.
+Each namespace maps to one URL-safe base64 encoded file name to avoid path
+traversal and namespace collisions. Deletes are represented with tombstone rows.
 """
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from data_agent_langchain.memory.base import MemoryRecord, RecordKind
+from data_agent_langchain.memory.base import MemoryRecord
 
 
 def _safe_filename(namespace: str) -> str:
-    return (
-        namespace.replace(":", "__").replace("/", "__").replace("\\", "__") + ".jsonl"
-    )
+    encoded = base64.urlsafe_b64encode(namespace.encode("utf-8")).decode("ascii")
+    return encoded.rstrip("=") + ".jsonl"
 
 
 def _record_to_json(rec: MemoryRecord) -> str:

@@ -47,6 +47,56 @@ def test_namespace_isolated(tmp_path: Path):
     assert store.list("dataset:ds2") == []
 
 
+def test_collision_looking_namespaces_are_isolated(tmp_path: Path):
+    store = JsonlMemoryStore(root=tmp_path)
+    store.put(
+        MemoryRecord(
+            id="colon",
+            namespace="a:b",
+            kind="dataset_knowledge",
+            payload={"namespace": "colon"},
+        )
+    )
+    store.put(
+        MemoryRecord(
+            id="slash",
+            namespace="a/b",
+            kind="dataset_knowledge",
+            payload={"namespace": "slash"},
+        )
+    )
+
+    assert [r.id for r in store.list("a:b")] == ["colon"]
+    assert [r.id for r in store.list("a/b")] == ["slash"]
+
+
+def test_delete_in_collision_looking_namespace_stays_isolated(tmp_path: Path):
+    store = JsonlMemoryStore(root=tmp_path)
+    store.put(
+        MemoryRecord(
+            id="same",
+            namespace="a:b",
+            kind="dataset_knowledge",
+            payload={"namespace": "colon"},
+        )
+    )
+    store.put(
+        MemoryRecord(
+            id="same",
+            namespace="a/b",
+            kind="dataset_knowledge",
+            payload={"namespace": "slash"},
+        )
+    )
+
+    store.delete("a/b", "same")
+
+    colon_record = store.get("a:b", "same")
+    assert colon_record is not None
+    assert colon_record.payload["namespace"] == "colon"
+    assert store.get("a/b", "same") is None
+
+
 def test_empty_namespace_returns_empty(tmp_path: Path):
     store = JsonlMemoryStore(root=tmp_path)
     assert store.list("dataset:none") == []
@@ -125,7 +175,7 @@ def test_safe_filename_replaces_windows_separators():
 
     assert "\\" not in filename
     assert "/" not in filename
-    assert filename == "dataset__..__outside.jsonl"
+    assert filename.endswith(".jsonl")
 
 
 def test_windows_namespace_separator_cannot_escape_root(tmp_path: Path):
@@ -146,4 +196,5 @@ def test_windows_namespace_separator_cannot_escape_root(tmp_path: Path):
     files = list(tmp_path.iterdir())
     assert len(files) == 1
     assert files[0].is_file()
-    assert files[0].name == "..__jsonl_store_escape_probe.jsonl"
+    assert "\\" not in files[0].name
+    assert "/" not in files[0].name
