@@ -124,6 +124,18 @@ class AgentConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryConfig:
+    """Cross-task memory configuration (v2 design section 4.2)."""
+    mode: str = "disabled"                          # disabled | read_only_dataset | full
+    store_backend: str = "jsonl"                    # jsonl | sqlite (future)
+    path: Path = field(
+        default_factory=lambda: PROJECT_ROOT / "artifacts" / "memory"
+    )
+    retriever_type: str = "exact"
+    retrieval_max_results: int = 5
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     """汇总所有子配置的顶级配置对象。
 
@@ -136,6 +148,7 @@ class AppConfig:
     run: RunConfig = field(default_factory=lambda: RunConfig())
     observability: ObservabilityConfig = field(default_factory=lambda: ObservabilityConfig())
     evaluation: EvaluationConfig = field(default_factory=lambda: EvaluationConfig())
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
 
     def to_dict(self) -> dict[str, Any]:
         """转为可 pickle 的纯字典（``Path`` 转 str、``tuple`` 转 list）。"""
@@ -153,6 +166,7 @@ class AppConfig:
                 ObservabilityConfig, payload.get("observability", {})
             ),
             evaluation=_dataclass_from_dict(EvaluationConfig, payload.get("evaluation", {})),
+            memory=_dataclass_from_dict(MemoryConfig, payload.get("memory", {})),
         )
 
 
@@ -304,7 +318,7 @@ def _dataclass_from_dict(cls: type[Any], payload: dict[str, Any]) -> Any:
         if field_info.name not in payload:
             continue
         value = payload[field_info.name]
-        if field_info.name in {"root_path", "output_dir", "gateway_caps_path"}:
+        if field_info.name in {"root_path", "output_dir", "gateway_caps_path", "path"}:
             value = Path(value)
         elif field_info.name == "model_retry_backoff":
             value = tuple(float(item) for item in value)
@@ -317,6 +331,7 @@ __all__ = [
     "AppConfig",
     "DatasetConfig",
     "EvaluationConfig",
+    "MemoryConfig",
     "ObservabilityConfig",
     "RunConfig",
     "ToolsConfig",
