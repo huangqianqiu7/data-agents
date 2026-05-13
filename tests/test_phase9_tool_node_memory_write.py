@@ -72,19 +72,6 @@ def test_real_tool_node_writes_memory_on_success(tmp_path: Path, monkeypatch):
         memory=MemoryConfig(mode="full", path=tmp_path / "memory"),
     )
     monkeypatch.setattr(tn, "_safe_get_app_config", lambda: cfg)
-    monkeypatch.setattr(
-        tn,
-        "call_tool_with_timeout",
-        lambda tool, action_input, timeout_s: ToolRuntimeResult(
-            ok=True,
-            content={
-                "path": "transactions.csv",
-                "columns": ["date", "amount"],
-                "dtypes": {"date": "string", "amount": "float"},
-                "row_count_estimate": 1,
-            },
-        ),
-    )
 
     update = tn.tool_node(
         {
@@ -107,7 +94,8 @@ def test_real_tool_node_writes_memory_on_success(tmp_path: Path, monkeypatch):
     recs = store.list("dataset:dataset_ds")
     assert len(recs) == 1
     assert recs[0].payload["file_path"] == "transactions.csv"
-    assert recs[0].payload["schema"] == {"date": "string", "amount": "float"}
+    assert recs[0].payload["schema"] == {"date": "string", "amount": "int"}
+    assert recs[0].payload["row_count_estimate"] == 1
 
 
 def test_maybe_write_skips_non_dataset_actions(tmp_path: Path):

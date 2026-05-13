@@ -279,10 +279,15 @@ def _maybe_write_dataset_knowledge(
     schema_src = content.get("dtypes")
     if schema_src is None:
         schema_src = content.get("schema")
-    if not isinstance(schema_src, dict):
-        return
-    schema = {str(k): str(v) for k, v in schema_src.items()}
+    if isinstance(schema_src, dict):
+        schema = {str(k): str(v) for k, v in schema_src.items()}
+    else:
+        schema = _infer_schema_from_preview(content)
+        if not schema:
+            return
     row_count = content.get("row_count_estimate")
+    if row_count is None:
+        row_count = content.get("row_count")
     if not isinstance(row_count, int):
         row_count = None
     columns = content.get("columns") or []
@@ -298,6 +303,44 @@ def _maybe_write_dataset_knowledge(
         writer.write_dataset_knowledge(dataset, record)
     except Exception as exc:
         logger.warning("[tool_node] memory write skipped: %s", exc)
+
+
+def _infer_schema_from_preview(content: dict[str, Any]) -> dict[str, str]:
+    columns = content.get("columns")
+    rows = content.get("rows")
+    if not isinstance(columns, list) or not isinstance(rows, list):
+        return {}
+    sample_row = rows[0] if rows else []
+    schema: dict[str, str] = {}
+    for index, column in enumerate(columns):
+        value = (
+            sample_row[index]
+            if isinstance(sample_row, list) and index < len(sample_row)
+            else None
+        )
+        schema[str(column)] = _infer_scalar_type(value)
+    return schema
+
+
+def _infer_scalar_type(value: Any) -> str:
+    if value is None:
+        return "string"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    text = str(value)
+    try:
+        int(text)
+    except ValueError:
+        try:
+            float(text)
+        except ValueError:
+            return "string"
+        return "float"
+    return "int"
 
 
 __all__ = ["tool_node", "_maybe_write_dataset_knowledge"]
