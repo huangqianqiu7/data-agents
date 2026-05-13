@@ -269,10 +269,16 @@ def _maybe_write_dataset_knowledge(
     file_kind = _DATASET_KNOWLEDGE_ACTIONS.get(action)
     if file_kind is None:
         return
-    file_path = action_input.get("file_path") or action_input.get("path") or content.get("file_path")
+    file_path = (
+        action_input.get("file_path")
+        or action_input.get("path")
+        or content.get("file_path")
+    )
     if not isinstance(file_path, str) or not file_path:
         return
-    schema_src = content.get("dtypes") or content.get("schema") or {}
+    schema_src = content.get("dtypes")
+    if schema_src is None:
+        schema_src = content.get("schema")
     if not isinstance(schema_src, dict):
         return
     schema = {str(k): str(v) for k, v in schema_src.items()}
