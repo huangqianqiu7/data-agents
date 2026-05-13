@@ -1,10 +1,19 @@
-from data_agent_langchain.config import AppConfig, MemoryConfig, default_app_config
+from pathlib import Path
+
+from data_agent_langchain.config import (
+    PROJECT_ROOT,
+    AppConfig,
+    MemoryConfig,
+    default_app_config,
+)
 
 
 def test_memory_config_defaults_safe_for_eval():
     cfg = MemoryConfig()
     assert cfg.mode == "disabled"
     assert cfg.store_backend == "jsonl"
+    assert isinstance(cfg.path, Path)
+    assert cfg.path == PROJECT_ROOT / "artifacts" / "memory"
     assert cfg.retriever_type == "exact"
     assert cfg.retrieval_max_results == 5
 
