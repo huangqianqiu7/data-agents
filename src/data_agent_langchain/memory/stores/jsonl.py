@@ -1,11 +1,10 @@
 """Append-only JSONL MemoryStore implementation.
 
-Each namespace maps to one URL-safe base64 encoded file name to avoid path
+Each namespace maps to one lowercase hex encoded file name to avoid path
 traversal and namespace collisions. Deletes are represented with tombstone rows.
 """
 from __future__ import annotations
 
-import base64
 import json
 from dataclasses import asdict
 from datetime import datetime
@@ -16,8 +15,7 @@ from data_agent_langchain.memory.base import MemoryRecord
 
 
 def _safe_filename(namespace: str) -> str:
-    encoded = base64.urlsafe_b64encode(namespace.encode("utf-8")).decode("ascii")
-    return encoded.rstrip("=") + ".jsonl"
+    return namespace.encode("utf-8").hex() + ".jsonl"
 
 
 def _record_to_json(rec: MemoryRecord) -> str:

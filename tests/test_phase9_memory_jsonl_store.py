@@ -97,6 +97,33 @@ def test_delete_in_collision_looking_namespace_stays_isolated(tmp_path: Path):
     assert store.get("a/b", "same") is None
 
 
+def test_case_only_filename_collision_namespaces_are_isolated(tmp_path: Path):
+    store = JsonlMemoryStore(root=tmp_path)
+    store.put(
+        MemoryRecord(
+            id="lower",
+            namespace="aaa",
+            kind="dataset_knowledge",
+            payload={"namespace": "aaa"},
+        )
+    )
+    store.put(
+        MemoryRecord(
+            id="mixed",
+            namespace="aaG",
+            kind="dataset_knowledge",
+            payload={"namespace": "aaG"},
+        )
+    )
+
+    assert [r.id for r in store.list("aaa")] == ["lower"]
+    assert [r.id for r in store.list("aaG")] == ["mixed"]
+
+
+def test_safe_filename_avoids_case_insensitive_collisions():
+    assert _safe_filename("aaa").lower() != _safe_filename("aaG").lower()
+
+
 def test_empty_namespace_returns_empty(tmp_path: Path):
     store = JsonlMemoryStore(root=tmp_path)
     assert store.list("dataset:none") == []
