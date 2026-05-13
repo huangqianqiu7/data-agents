@@ -38,11 +38,14 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from data_agent_langchain.agents.gate import DATA_PREVIEW_ACTIONS
 from data_agent_langchain.agents.runtime import StepRecord
 from data_agent_langchain.config import AppConfig, default_app_config
+from data_agent_langchain.memory.records import DatasetKnowledgeRecord
+from data_agent_langchain.memory.writers.store_backed import StoreBackedMemoryWriter
 from data_agent_langchain.observability.events import dispatch_observability_event
 from data_agent_langchain.runtime.context import get_current_app_config
 from data_agent_langchain.runtime.rehydrate import build_runtime, rehydrate_task
@@ -121,6 +124,24 @@ def tool_node(state: RunState, config: Any | None = None) -> dict[str, Any]:
             update["discovery_done"] = True
         if action in DATA_PREVIEW_ACTIONS:
             update["preview_done"] = True
+        memory_cfg = getattr(app_config, "memory", None)
+        if memory_cfg is not None and memory_cfg.mode != "disabled":
+            try:
+                from data_agent_langchain.memory.factory import build_store, build_writer
+
+                store = build_store(memory_cfg)
+                writer = build_writer(memory_cfg, store=store)
+                dataset_name = Path(state.get("dataset_root", "") or ".").name or "default"
+                content = result.content if isinstance(result.content, dict) else {}
+                _maybe_write_dataset_knowledge(
+                    writer=writer,
+                    dataset=dataset_name,
+                    action=action,
+                    action_input=action_input,
+                    content=content,
+                )
+            except Exception as exc:
+                logger.warning("[tool_node] memory subsystem error: %s", exc)
 
     return update
 
@@ -228,4 +249,49 @@ def _emit_runtime_failure(state: RunState, action: str, msg: str) -> dict[str, A
     }
 
 
-__all__ = ["tool_node"]
+_DATASET_KNOWLEDGE_ACTIONS: dict[str, str] = {
+    "read_csv": "csv",
+    "read_json": "json",
+    "read_doc": "doc",
+    "inspect_sqlite_schema": "sqlite",
+}
+
+
+def _maybe_write_dataset_knowledge(
+    *,
+    writer: StoreBackedMemoryWriter,
+    dataset: str,
+    action: str,
+    action_input: dict[str, Any],
+    content: dict[str, Any],
+) -> None:
+    """Write DatasetKnowledgeRecord after successful preview tools; skip safely on missing fields."""
+    file_kind = _DATASET_KNOWLEDGE_ACTIONS.get(action)
+    if file_kind is None:
+        return
+    file_path = action_input.get("file_path") or action_input.get("path") or content.get("file_path")
+    if not isinstance(file_path, str) or not file_path:
+        return
+    schema_src = content.get("dtypes") or content.get("schema") or {}
+    if not isinstance(schema_src, dict):
+        return
+    schema = {str(k): str(v) for k, v in schema_src.items()}
+    row_count = content.get("row_count_estimate")
+    if not isinstance(row_count, int):
+        row_count = None
+    columns = content.get("columns") or []
+    sample_columns = [str(c) for c in columns] if isinstance(columns, list) else []
+    record = DatasetKnowledgeRecord(
+        file_path=file_path,
+        file_kind=file_kind,  # type: ignore[arg-type]
+        schema=schema,
+        row_count_estimate=row_count,
+        sample_columns=sample_columns,
+    )
+    try:
+        writer.write_dataset_knowledge(dataset, record)
+    except Exception as exc:
+        logger.warning("[tool_node] memory write skipped: %s", exc)
+
+
+__all__ = ["tool_node", "_maybe_write_dataset_knowledge"]
