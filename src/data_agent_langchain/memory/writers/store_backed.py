@@ -10,8 +10,13 @@ from data_agent_langchain.memory.records import (
 )
 
 
+_VALID_MEMORY_MODES = frozenset({"disabled", "read_only_dataset", "full"})
+
+
 class StoreBackedMemoryWriter:
     def __init__(self, store: MemoryStore, *, mode: str) -> None:
+        if mode not in _VALID_MEMORY_MODES:
+            raise ValueError(f"unsupported memory mode: {mode!r}")
         self._store = store
         self._mode = mode
 
