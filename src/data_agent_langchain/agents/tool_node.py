@@ -276,22 +276,21 @@ def _maybe_write_dataset_knowledge(
     )
     if not isinstance(file_path, str) or not file_path:
         return
-    schema_src = content.get("dtypes")
-    if schema_src is None:
-        schema_src = content.get("schema")
-    if isinstance(schema_src, dict):
-        schema = {str(k): str(v) for k, v in schema_src.items()}
-    else:
-        schema = _infer_schema_from_preview(content)
-        if not schema:
-            return
+    schema = _extract_dataset_schema(action, content)
+    if not schema:
+        return
     row_count = content.get("row_count_estimate")
     if row_count is None:
         row_count = content.get("row_count")
     if not isinstance(row_count, int):
         row_count = None
-    columns = content.get("columns") or []
-    sample_columns = [str(c) for c in columns] if isinstance(columns, list) else []
+    columns = content.get("columns")
+    if isinstance(columns, list) and columns:
+        sample_columns = [str(c) for c in columns]
+    elif action == "inspect_sqlite_schema":
+        sample_columns = _sqlite_table_names(content)
+    else:
+        sample_columns = []
     record = DatasetKnowledgeRecord(
         file_path=file_path,
         file_kind=file_kind,  # type: ignore[arg-type]
@@ -303,6 +302,43 @@ def _maybe_write_dataset_knowledge(
         writer.write_dataset_knowledge(dataset, record)
     except Exception as exc:
         logger.warning("[tool_node] memory write skipped: %s", exc)
+
+
+def _extract_dataset_schema(action: str, content: dict[str, Any]) -> dict[str, str]:
+    schema_src = content.get("dtypes")
+    if schema_src is None:
+        schema_src = content.get("schema")
+    if isinstance(schema_src, dict):
+        return {str(k): str(v) for k, v in schema_src.items() if str(k)}
+    if action == "inspect_sqlite_schema":
+        return _schema_from_sqlite_tables(content)
+    return _infer_schema_from_preview(content)
+
+
+def _schema_from_sqlite_tables(content: dict[str, Any]) -> dict[str, str]:
+    tables = content.get("tables")
+    if not isinstance(tables, list):
+        return {}
+    schema: dict[str, str] = {}
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        name = table.get("name")
+        create_sql = table.get("create_sql")
+        if isinstance(name, str) and name and isinstance(create_sql, str) and create_sql:
+            schema[name] = create_sql
+    return schema
+
+
+def _sqlite_table_names(content: dict[str, Any]) -> list[str]:
+    tables = content.get("tables")
+    if not isinstance(tables, list):
+        return []
+    names: list[str] = []
+    for table in tables:
+        if isinstance(table, dict) and isinstance(table.get("name"), str):
+            names.append(table["name"])
+    return names
 
 
 def _infer_schema_from_preview(content: dict[str, Any]) -> dict[str, str]:
