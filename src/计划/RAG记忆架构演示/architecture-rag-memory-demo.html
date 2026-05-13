@@ -1,0 +1,1205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>data_agent_langchain 架构与 RAG / 记忆模块演进演示</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: rgba(15, 23, 42, 0.82);
+      --panel-strong: rgba(30, 41, 59, 0.92);
+      --card: rgba(255, 255, 255, 0.08);
+      --card-hover: rgba(255, 255, 255, 0.13);
+      --border: rgba(148, 163, 184, 0.24);
+      --border-strong: rgba(125, 211, 252, 0.55);
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-2: #a78bfa;
+      --accent-3: #34d399;
+      --warning: #fbbf24;
+      --danger: #fb7185;
+      --good: #22c55e;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      --radius: 22px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: Inter, "Microsoft YaHei", "PingFang SC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.26), transparent 32rem),
+        radial-gradient(circle at top right, rgba(167, 139, 250, 0.25), transparent 34rem),
+        radial-gradient(circle at bottom, rgba(52, 211, 153, 0.16), transparent 35rem),
+        var(--bg);
+      line-height: 1.65;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    .shell {
+      width: min(1480px, calc(100% - 36px));
+      margin: 0 auto;
+      padding: 28px 0 64px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 36px;
+      border: 1px solid var(--border);
+      border-radius: 32px;
+      background: linear-gradient(135deg, rgba(15, 23, 42, 0.88), rgba(30, 41, 59, 0.78));
+      box-shadow: var(--shadow);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -120px -160px auto;
+      width: 420px;
+      height: 420px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.14);
+      filter: blur(10px);
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1.25fr 0.75fr;
+      gap: 28px;
+      align-items: start;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 12px;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 999px;
+      color: #bae6fd;
+      background: rgba(14, 165, 233, 0.12);
+      font-size: 13px;
+      letter-spacing: 0.03em;
+    }
+
+    h1 {
+      margin: 18px 0 12px;
+      font-size: clamp(32px, 5vw, 58px);
+      line-height: 1.05;
+      letter-spacing: -0.055em;
+    }
+
+    .lead {
+      max-width: 860px;
+      color: #cbd5e1;
+      font-size: 18px;
+      margin: 0;
+    }
+
+    .hero-stat-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .stat-card {
+      padding: 18px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.07);
+      backdrop-filter: blur(16px);
+    }
+
+    .stat-card strong {
+      display: block;
+      font-size: 24px;
+      color: white;
+    }
+
+    .stat-card span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      margin: 18px 0;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      background: rgba(15, 23, 42, 0.82);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+    }
+
+    .toolbar-inner {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .nav-buttons,
+    .view-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    button {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 10px 14px;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.07);
+      cursor: pointer;
+      transition: 150ms ease;
+      font: inherit;
+      font-size: 14px;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      border-color: var(--border-strong);
+      background: rgba(56, 189, 248, 0.14);
+    }
+
+    button.active {
+      color: #082f49;
+      border-color: transparent;
+      background: linear-gradient(135deg, #7dd3fc, #c4b5fd);
+      font-weight: 750;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .section {
+      margin-top: 18px;
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: 0 20px 70px rgba(0, 0, 0, 0.18);
+    }
+
+    .section h2 {
+      margin: 0 0 8px;
+      font-size: 26px;
+      letter-spacing: -0.025em;
+    }
+
+    .section-subtitle {
+      margin: 0 0 20px;
+      color: var(--muted);
+    }
+
+    .stage-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .stage-card {
+      position: relative;
+      min-height: 242px;
+      padding: 20px;
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      background: var(--card);
+      cursor: pointer;
+      overflow: hidden;
+      transition: 170ms ease;
+    }
+
+    .stage-card:hover,
+    .stage-card.active {
+      border-color: var(--border-strong);
+      background: var(--card-hover);
+      transform: translateY(-2px);
+    }
+
+    .stage-card.active::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto;
+      height: 4px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3));
+    }
+
+    .stage-index {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 14px;
+      border-radius: 14px;
+      color: #082f49;
+      background: linear-gradient(135deg, #7dd3fc, #c4b5fd);
+      font-weight: 900;
+    }
+
+    .stage-card h3 {
+      margin: 0 0 8px;
+      font-size: 20px;
+    }
+
+    .stage-card p {
+      margin: 0;
+      color: #cbd5e1;
+      font-size: 14px;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 14px;
+    }
+
+    .tag {
+      display: inline-flex;
+      padding: 4px 9px;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 999px;
+      color: #cbd5e1;
+      background: rgba(255, 255, 255, 0.06);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .tag.good {
+      color: #bbf7d0;
+      border-color: rgba(34, 197, 94, 0.3);
+      background: rgba(34, 197, 94, 0.11);
+    }
+
+    .tag.warn {
+      color: #fde68a;
+      border-color: rgba(251, 191, 36, 0.32);
+      background: rgba(251, 191, 36, 0.1);
+    }
+
+    .tag.danger {
+      color: #fecdd3;
+      border-color: rgba(251, 113, 133, 0.34);
+      background: rgba(251, 113, 133, 0.1);
+    }
+
+    .stage-details {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .detail-panel {
+      padding: 18px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .detail-panel h4 {
+      margin: 0 0 8px;
+      color: #e0f2fe;
+    }
+
+    .detail-panel ul,
+    .detail-panel ol {
+      margin: 0;
+      padding-left: 20px;
+      color: #cbd5e1;
+    }
+
+    .detail-panel li + li {
+      margin-top: 5px;
+    }
+
+    .architecture-canvas {
+      display: grid;
+      gap: 16px;
+    }
+
+    .layer {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .layer-label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 92px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      color: #dbeafe;
+      background: rgba(30, 41, 59, 0.9);
+      text-align: center;
+      font-weight: 800;
+    }
+
+    .module-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+      gap: 10px;
+    }
+
+    .module {
+      position: relative;
+      min-height: 92px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.065);
+      cursor: pointer;
+      transition: 160ms ease;
+    }
+
+    .module:hover,
+    .module.active {
+      border-color: var(--border-strong);
+      background: rgba(56, 189, 248, 0.12);
+      transform: translateY(-1px);
+    }
+
+    .module.memory-candidate {
+      border-color: rgba(52, 211, 153, 0.34);
+      background: rgba(52, 211, 153, 0.08);
+    }
+
+    .module.rag-candidate {
+      border-color: rgba(167, 139, 250, 0.38);
+      background: rgba(167, 139, 250, 0.09);
+    }
+
+    .module strong {
+      display: block;
+      margin-bottom: 5px;
+      color: white;
+      font-size: 15px;
+    }
+
+    .module span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .arrow-line {
+      display: grid;
+      place-items: center;
+      color: var(--accent);
+      font-weight: 900;
+      letter-spacing: 0.3em;
+    }
+
+    .side-panel {
+      position: sticky;
+      top: 94px;
+      padding: 20px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel-strong);
+      box-shadow: var(--shadow);
+    }
+
+    .side-panel h3 {
+      margin: 0 0 8px;
+      font-size: 22px;
+    }
+
+    .side-panel .path {
+      display: block;
+      margin: 8px 0 14px;
+      padding: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 12px;
+      color: #bae6fd;
+      background: rgba(15, 23, 42, 0.72);
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
+      word-break: break-all;
+    }
+
+    .side-panel h4 {
+      margin: 18px 0 7px;
+      color: #e0f2fe;
+    }
+
+    .side-panel ul {
+      margin: 0;
+      padding-left: 20px;
+      color: #cbd5e1;
+    }
+
+    .side-panel li + li {
+      margin-top: 4px;
+    }
+
+    .flow-board {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .flow-card {
+      padding: 18px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .flow-card h3 {
+      margin: 0 0 10px;
+    }
+
+    .flow-step {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 10px;
+      align-items: start;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+    }
+
+    .flow-step:last-child {
+      border-bottom: 0;
+    }
+
+    .flow-num {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 11px;
+      color: #082f49;
+      background: #7dd3fc;
+      font-weight: 900;
+      font-size: 13px;
+    }
+
+    .flow-step strong {
+      display: block;
+      color: white;
+    }
+
+    .flow-step span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+    }
+
+    .compare-table th,
+    .compare-table td {
+      padding: 13px 14px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .compare-table th {
+      color: #e0f2fe;
+      background: rgba(15, 23, 42, 0.8);
+    }
+
+    .compare-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .compare-table td {
+      color: #cbd5e1;
+      background: rgba(255, 255, 255, 0.035);
+    }
+
+    .code-box {
+      overflow-x: auto;
+      padding: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 18px;
+      color: #c4b5fd;
+      background: rgba(2, 6, 23, 0.72);
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .risk-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .risk-card {
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .risk-card h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+    }
+
+    .risk-card p {
+      margin: 0;
+      color: #cbd5e1;
+      font-size: 14px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .footer {
+      margin-top: 18px;
+      padding: 20px;
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      color: var(--muted);
+      background: rgba(15, 23, 42, 0.72);
+      text-align: center;
+      font-size: 14px;
+    }
+
+    @media (max-width: 1080px) {
+      .hero-content,
+      .grid,
+      .stage-details,
+      .flow-board,
+      .risk-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .side-panel {
+        position: static;
+      }
+
+      .stage-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .layer {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="hero">
+      <div class="hero-content">
+        <div>
+          <span class="eyebrow">交互学习型架构演示 · LangGraph Data Agent</span>
+          <h1>data_agent_langchain 架构与 RAG / 记忆模块演进</h1>
+          <p class="lead">
+            这个页面用“三阶段演进”的方式解释当前项目系统架构：先理解现有 DABench LangGraph 后端，再看如何加入结构化 Memory MVP，最后演进到 Corpus RAG。点击阶段卡片和模块节点，可以查看对应职责、接入点、风险与测试建议。
+          </p>
+        </div>
+        <div class="hero-stat-grid">
+          <div class="stat-card">
+            <strong>2</strong>
+            <span>外层图：ReAct / Plan-and-Solve</span>
+          </div>
+          <div class="stat-card">
+            <strong>5</strong>
+            <span>共享执行子图核心节点</span>
+          </div>
+          <div class="stat-card">
+            <strong>3</strong>
+            <span>推荐演进阶段：Current → Memory MVP → RAG Full</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <nav class="toolbar">
+      <div class="toolbar-inner">
+        <div class="nav-buttons">
+          <button class="active" data-scroll="stages">三阶段路线</button>
+          <button data-scroll="architecture">系统架构</button>
+          <button data-scroll="integration">接入方案</button>
+          <button data-scroll="testing">风险与测试</button>
+        </div>
+        <div class="view-buttons">
+          <button class="active" data-view="architecture-view">架构图</button>
+          <button data-view="memory-view">Memory / RAG 接入图</button>
+          <button data-view="flow-view">执行流</button>
+        </div>
+      </div>
+    </nav>
+
+    <section id="stages" class="section">
+      <h2>三阶段演进路线</h2>
+      <p class="section-subtitle">推荐先保证当前 LangGraph 后端稳定，再加入低风险结构化 Memory，最后扩展 Corpus RAG。</p>
+
+      <div class="stage-grid">
+        <article class="stage-card active" data-stage="current">
+          <div class="stage-index">0</div>
+          <h3>Current：现有 LangGraph 数据智能体</h3>
+          <p>当前系统已经具备 CLI / submission 入口、runner 并发执行、ReAct / Plan-and-Solve 图、工具调用、gate、trace 和 metrics。</p>
+          <div class="tag-row">
+            <span class="tag good">已实现</span>
+            <span class="tag">RunState</span>
+            <span class="tag">Tool Calling</span>
+          </div>
+        </article>
+
+        <article class="stage-card" data-stage="memory">
+          <div class="stage-index">1</div>
+          <h3>Memory MVP：结构化数据集记忆</h3>
+          <p>新增 dataset_knowledge 与 tool_playbook，避免反复探索 schema、文件路径和工具模板，但不记录答案和解题思路。</p>
+          <div class="tag-row">
+            <span class="tag good">推荐先做</span>
+            <span class="tag">KV Store</span>
+            <span class="tag">Exact Retriever</span>
+          </div>
+        </article>
+
+        <article class="stage-card" data-stage="rag">
+          <div class="stage-index">2</div>
+          <h3>RAG Full：外部语料检索增强</h3>
+          <p>新增 corpus ingest、chunk store、retriever 与 prompt 注入，用于检索领域说明、规则文档和人工维护的知识库。</p>
+          <div class="tag-row">
+            <span class="tag warn">第二阶段后做</span>
+            <span class="tag">Corpus</span>
+            <span class="tag">BM25 / Vector</span>
+          </div>
+        </article>
+      </div>
+
+      <div class="stage-details">
+        <div class="detail-panel">
+          <h4 id="stage-title">Current：现有系统重点</h4>
+          <ul id="stage-points"></ul>
+        </div>
+        <div class="detail-panel">
+          <h4 id="stage-recommendation-title">为什么这样设计</h4>
+          <ul id="stage-recommendations"></ul>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid">
+      <main>
+        <section id="architecture" class="section">
+          <h2>系统架构地图</h2>
+          <p class="section-subtitle">点击任意模块，在右侧查看职责、关联文件和 Memory/RAG 接入建议。</p>
+
+          <div id="architecture-view" class="architecture-canvas view-panel">
+            <div class="layer">
+              <div class="layer-label">入口层</div>
+              <div class="module-row">
+                <div class="module" data-module="cli"><strong>cli.py</strong><span>本地 dabench-lc 命令入口</span></div>
+                <div class="module" data-module="submission"><strong>submission.py</strong><span>容器提交入口，不读 YAML</span></div>
+              </div>
+            </div>
+            <div class="arrow-line">↓</div>
+            <div class="layer">
+              <div class="layer-label">运行编排层</div>
+              <div class="module-row">
+                <div class="module" data-module="runner"><strong>run/runner.py</strong><span>单任务、批量、并发、子进程隔离</span></div>
+                <div class="module" data-module="config"><strong>config.py</strong><span>AppConfig 与 YAML / env 加载</span></div>
+                <div class="module" data-module="llm"><strong>llm/factory.py</strong><span>ChatOpenAI 与工具绑定</span></div>
+              </div>
+            </div>
+            <div class="arrow-line">↓</div>
+            <div class="layer">
+              <div class="layer-label">LangGraph 图层</div>
+              <div class="module-row">
+                <div class="module" data-module="react"><strong>react_graph.py</strong><span>START → execution → finalize</span></div>
+                <div class="module" data-module="plan"><strong>plan_solve_graph.py</strong><span>planner / execution / replanner / finalize</span></div>
+                <div class="module" data-module="execution"><strong>execution_subgraph.py</strong><span>共享 T-A-O 循环</span></div>
+              </div>
+            </div>
+            <div class="arrow-line">↓</div>
+            <div class="layer">
+              <div class="layer-label">核心节点层</div>
+              <div class="module-row">
+                <div class="module memory-candidate rag-candidate" data-module="planner"><strong>planner_node.py</strong><span>生成 plan，可召回 Memory/RAG</span></div>
+                <div class="module memory-candidate rag-candidate" data-module="model"><strong>model_node.py</strong><span>构造消息并调用 LLM</span></div>
+                <div class="module" data-module="parse"><strong>parse_action.py</strong><span>解析 tool_calls / JSON action</span></div>
+                <div class="module" data-module="gate"><strong>gate.py</strong><span>强制先预览数据</span></div>
+                <div class="module memory-candidate" data-module="tool"><strong>tool_node.py</strong><span>执行工具，适合写 Memory</span></div>
+                <div class="module" data-module="advance"><strong>advance_node.py</strong><span>继续 / 完成 / replan 路由</span></div>
+                <div class="module" data-module="finalize"><strong>finalize.py</strong><span>生成 AgentRunResult</span></div>
+              </div>
+            </div>
+            <div class="arrow-line">↓</div>
+            <div class="layer">
+              <div class="layer-label">工具 / 状态 / 观测</div>
+              <div class="module-row">
+                <div class="module" data-module="tools"><strong>tools/</strong><span>answer、read_csv、read_doc、execute_python 等</span></div>
+                <div class="module" data-module="state"><strong>runtime/state.py</strong><span>RunState，只放可 pickle 字段</span></div>
+                <div class="module memory-candidate" data-module="working"><strong>memory/working.py</strong><span>当前 run 内 scratchpad，不跨 task</span></div>
+                <div class="module" data-module="observability"><strong>observability/</strong><span>events、metrics、gateway caps、tracer</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div id="memory-view" class="architecture-canvas view-panel hidden">
+            <div class="flow-board">
+              <div class="flow-card">
+                <h3>Memory MVP 推荐接入</h3>
+                <div class="flow-step"><div class="flow-num">1</div><div><strong>工具成功后写结构化知识</strong><span>`tool_node` 在 `read_csv` / `read_json` / `inspect_sqlite_schema` 成功后提取 schema、行数估计、路径信息。</span></div></div>
+                <div class="flow-step"><div class="flow-num">2</div><div><strong>MemoryWriter 只接受 dataclass</strong><span>`DatasetKnowledgeRecord` 与 `ToolPlaybookRecord` 明确禁止 question、answer、approach、hint。</span></div></div>
+                <div class="flow-step"><div class="flow-num">3</div><div><strong>Retriever 按 namespace 召回</strong><span>`planner_node` / `model_node` 用 `dataset:{name}` 召回少量结构化事实。</span></div></div>
+                <div class="flow-step"><div class="flow-num">4</div><div><strong>prompts.py 白名单渲染</strong><span>只把 file path、columns、dtype、row_count 等字段写入 prompt。</span></div></div>
+              </div>
+              <div class="flow-card">
+                <h3>Corpus RAG 推荐接入</h3>
+                <div class="flow-step"><div class="flow-num">1</div><div><strong>离线 ingest</strong><span>把外部说明文档、领域知识、规则文档切片，写入 corpus store。</span></div></div>
+                <div class="flow-step"><div class="flow-num">2</div><div><strong>检索与 Memory 解耦</strong><span>Corpus retriever 读取 `corpus:{name}`，不要与 dataset_knowledge 混在一个自由文本 namespace。</span></div></div>
+                <div class="flow-step"><div class="flow-num">3</div><div><strong>轻量摘要进 RunState</strong><span>store / retriever 句柄不进 `RunState`，最多记录 `memory_hits` / recall summary 供 audit。</span></div></div>
+                <div class="flow-step"><div class="flow-num">4</div><div><strong>按节点注入</strong><span>规划类信息给 `planner_node`，执行上下文给 `model_node`，不要所有节点拿同一个 Facade。</span></div></div>
+              </div>
+            </div>
+
+            <table class="compare-table" style="margin-top:14px">
+              <thead>
+                <tr><th>能力</th><th>Memory MVP</th><th>Corpus RAG</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>核心数据</td><td>schema、路径、行数、工具模板</td><td>外部文档 chunk、领域说明、规则材料</td></tr>
+                <tr><td>写入来源</td><td>工具成功观察结果</td><td>离线 ingest 或人工维护</td></tr>
+                <tr><td>默认风险</td><td>低，结构化且不含答案</td><td>中，需要文档来源和召回审计</td></tr>
+                <tr><td>推荐顺序</td><td>第一阶段先做</td><td>第二阶段再做</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div id="flow-view" class="view-panel hidden">
+            <div class="flow-board">
+              <div class="flow-card">
+                <h3>单任务执行流</h3>
+                <div class="flow-step"><div class="flow-num">1</div><div><strong>入口构造 AppConfig</strong><span>本地从 `cli.py + load_app_config` 进入，容器从 `submission.py + MODEL_* env` 进入。</span></div></div>
+                <div class="flow-step"><div class="flow-num">2</div><div><strong>runner 构造初始 RunState</strong><span>字段包含 task_id、question、context_dir、mode、action_mode、max_steps 等。</span></div></div>
+                <div class="flow-step"><div class="flow-num">3</div><div><strong>选择外层图</strong><span>`react` 使用 ReAct 图；`plan_solve` 先进入 planner，再进入共享 execution 子图。</span></div></div>
+                <div class="flow-step"><div class="flow-num">4</div><div><strong>执行 T-A-O 循环</strong><span>`model_node → parse_action_node → gate_node → tool_node → advance_node`。</span></div></div>
+                <div class="flow-step"><div class="flow-num">5</div><div><strong>finalize 落盘</strong><span>写出 trace、metrics、prediction.csv 或 failure_reason。</span></div></div>
+              </div>
+              <div class="flow-card">
+                <h3>加入 Memory/RAG 后的变化</h3>
+                <div class="flow-step"><div class="flow-num">A</div><div><strong>planner 前召回</strong><span>读取 dataset facts 或 corpus context，帮助生成不重复探索的 plan。</span></div></div>
+                <div class="flow-step"><div class="flow-num">B</div><div><strong>model prompt 注入</strong><span>在 `build_react_messages` / execution messages 中加入白名单渲染的事实块。</span></div></div>
+                <div class="flow-step"><div class="flow-num">C</div><div><strong>tool 成功后写入</strong><span>把结构化 schema / tool template 写入 MemoryStore。</span></div></div>
+                <div class="flow-step"><div class="flow-num">D</div><div><strong>observability 记录 recall</strong><span>每次 retrieve 写 `memory_recall` 事件，方便 audit。</span></div></div>
+              </div>
+            </div>
+
+            <div class="code-box" style="margin-top:14px">START → planner_node? → execution_subgraph
+execution_subgraph:
+  model_node → parse_action_node → gate_node
+    ├─ skip_tool=True  → advance_node
+    └─ skip_tool=False → tool_node → advance_node
+advance_node:
+  continue → model_node
+  done → finalize
+  replan_required → replanner_node 或 finalize</div>
+          </div>
+        </section>
+
+        <section id="integration" class="section">
+          <h2>RAG 与记忆模块应该怎么加</h2>
+          <p class="section-subtitle">核心原则：Memory 是语义复用载体，LangGraph checkpointer 是状态恢复机制，二者不要混用。</p>
+
+          <table class="compare-table">
+            <thead>
+              <tr><th>新增模块</th><th>职责</th><th>推荐位置</th><th>接入节点</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>MemoryConfig</td><td>三态开关、store 后端、检索数量</td><td>`config.py`</td><td>runner / node 通过 AppConfig 读取</td></tr>
+              <tr><td>MemoryRecord</td><td>KV 信封，带 namespace、kind、payload</td><td>`memory/base.py`</td><td>store / retriever / writer</td></tr>
+              <tr><td>DatasetKnowledgeRecord</td><td>file_path、schema、row_count、dtype</td><td>`memory/records.py`</td><td>`tool_node` 写，`planner_node` 读</td></tr>
+              <tr><td>ToolPlaybookRecord</td><td>工具参数模板、前置条件、常见失败</td><td>`memory/records.py`</td><td>`tool_node` 写，`model_node` 读</td></tr>
+              <tr><td>JsonlMemoryStore</td><td>append-only KV 存储，低运维成本</td><td>`memory/stores/jsonl.py`</td><td>通过 factory 构造</td></tr>
+              <tr><td>ExactNamespaceRetriever</td><td>按 namespace 列出结构化记录</td><td>`memory/retrievers/exact.py`</td><td>`planner_node` / `model_node`</td></tr>
+              <tr><td>Corpus RAG</td><td>外部文档 ingest、chunk、检索</td><td>`memory/rag/`</td><td>`planner_node` / `model_node`</td></tr>
+            </tbody>
+          </table>
+
+          <div class="stage-details" style="margin-top:14px">
+            <div class="detail-panel">
+              <h4>建议的最小实现顺序</h4>
+              <ol>
+                <li>实现 `MemoryStore`、`MemoryWriter`、`ExactNamespaceRetriever`。</li>
+                <li>在 `tool_node` 成功工具调用后写 `dataset_knowledge`。</li>
+                <li>在 `planner_node` 入口召回 dataset facts。</li>
+                <li>在 `prompts.py` 增加白名单渲染函数。</li>
+                <li>增加 `memory.mode=disabled` 与 `read_only_dataset` 测试。</li>
+                <li>稳定后再新增 `memory/rag/` 做 corpus ingest。</li>
+              </ol>
+            </div>
+            <div class="detail-panel">
+              <h4>不要一开始做什么</h4>
+              <ul>
+                <li>不要做跨 task episodic memory。</li>
+                <li>不要把历史答案、解题思路、question、hint 写进长期记忆。</li>
+                <li>不要把 store / retriever / writer 对象放进 `RunState`。</li>
+                <li>不要让所有节点拿一个万能 `MemoryFacade`。</li>
+                <li>不要在图节点循环里构建重型向量索引。</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="testing" class="section">
+          <h2>风险与测试策略</h2>
+          <p class="section-subtitle">RAG 与长期记忆会改变模型输入，必须把公平性、可复现性和审计能力设计在第一版里。</p>
+
+          <div class="risk-grid">
+            <div class="risk-card">
+              <h3>风险：跨 task 答案泄露</h3>
+              <p>对策：MemoryWriter 只接受结构化 dataclass，字段层面不允许 question、answer、approach、hint、summary。</p>
+            </div>
+            <div class="risk-card">
+              <h3>风险：破坏 RunState 可序列化</h3>
+              <p>对策：RunState 只保留轻量 summary，store / retriever / writer 在节点入口通过 factory 构造。</p>
+            </div>
+            <div class="risk-card">
+              <h3>风险：召回污染 prompt</h3>
+              <p>对策：`prompts.py` 白名单渲染，只注入允许字段，并记录 memory_recall 事件。</p>
+            </div>
+            <div class="risk-card">
+              <h3>风险：与 baseline parity 混淆</h3>
+              <p>对策：保留 `memory.mode=disabled`，任何对比实验都能关闭记忆路径。</p>
+            </div>
+          </div>
+
+          <div class="detail-panel" style="margin-top:14px">
+            <h4>建议测试清单</h4>
+            <ul>
+              <li>`JsonlMemoryStore.put/list`：验证 KV 写入、namespace 隔离、limit 生效。</li>
+              <li>`ExactNamespaceRetriever.retrieve`：验证按 namespace 返回、空 namespace 返回空列表。</li>
+              <li>`MemoryWriter.write_dataset_knowledge`：验证结构化字段可写入。</li>
+              <li>`read_only_dataset`：允许写 dataset knowledge，拒写 tool playbook。</li>
+              <li>`disabled`：所有写入 no-op，所有 retrieve 返回空。</li>
+              <li>`RunState` picklability：确认没有非 pickle 对象进入 state。</li>
+              <li>`prompts.py` 白名单渲染：payload 中额外字段不会进入 prompt。</li>
+              <li>`memory_recall` event：每次 retrieve 都进入 metrics / trace audit。</li>
+            </ul>
+          </div>
+        </section>
+      </main>
+
+      <aside class="side-panel">
+        <h3 id="module-title">点击左侧模块查看详情</h3>
+        <span id="module-path" class="path">建议先点：planner_node.py、model_node.py、tool_node.py、runtime/state.py</span>
+        <p id="module-summary" style="color:#cbd5e1;margin:0">这里会显示模块职责、当前不变量，以及加入 Memory / RAG 时应该怎么接。</p>
+        <h4>当前职责</h4>
+        <ul id="module-responsibilities"></ul>
+        <h4>Memory / RAG 接入建议</h4>
+        <ul id="module-integration"></ul>
+        <h4>注意事项</h4>
+        <ul id="module-warnings"></ul>
+      </aside>
+    </div>
+
+    <footer class="footer">
+      文件位置：src/计划/RAG记忆架构演示/architecture-rag-memory-demo.html · 这是静态演示页，不修改运行时代码，不依赖外网资源。
+    </footer>
+  </div>
+
+  <script>
+    const stages = {
+      current: {
+        title: "Current：现有系统重点",
+        points: [
+          "`data_agent_langchain` 是当前默认 LangGraph 后端。",
+          "入口分为本地 CLI 与容器 submission，两者最终进入 runner。",
+          "runner 负责任务加载、并发、子进程隔离、图编译、trace/metrics 落盘。",
+          "ReAct 与 Plan-and-Solve 共享同一个 execution_subgraph。",
+          "现有 `memory/working.py` 只是 run 内 scratchpad，不是跨 task 长期记忆。"
+        ],
+        recommendations: [
+          "先理解现有 execution loop，再决定在哪个节点做召回或写入。",
+          "`RunState` 只允许可 pickle 字段，所有复杂对象都必须节点入口现场构造。",
+          "不要把 Memory 当成 LangGraph checkpointer；二者生命周期和用途不同。"
+        ]
+      },
+      memory: {
+        title: "Memory MVP：结构化记忆",
+        points: [
+          "先新增 `dataset_knowledge`：文件路径、列名、dtype、行数估计。",
+          "再新增 `tool_playbook`：工具参数模板、前置条件、常见失败。",
+          "`tool_node` 是写入点，因为它能看到工具成功后的结构化 observation。",
+          "`planner_node` / `model_node` 是读取点，因为它们负责规划和下一步动作选择。",
+          "`prompts.py` 负责把召回结果白名单渲染进 prompt。"
+        ],
+        recommendations: [
+          "这是最低风险路线，因为不保存题目、答案和自由文本推理。",
+          "可以减少重复 list_context、重复 schema 探索和错误工具参数。",
+          "默认模式建议是 `read_only_dataset`，保留 `disabled` 做 baseline parity。"
+        ]
+      },
+      rag: {
+        title: "RAG Full：语料检索增强",
+        points: [
+          "RAG 适合外部语料：领域文档、规则说明、人工维护知识库。",
+          "建议放在 `memory/rag/` 或独立 retrieval 子包，不与 dataset memory 混成一个自由文本池。",
+          "索引构建应放在离线 ingest 或子进程启动阶段，不在每轮 graph node 中构建。",
+          "召回结果只以摘要和引用进入 prompt，完整 retriever 句柄不进入 `RunState`。",
+          "每次召回都要记录 memory_recall 事件，方便 audit。"
+        ],
+        recommendations: [
+          "RAG 会明显改变模型输入，应在 Memory MVP 稳定后再做。",
+          "先用 Exact / BM25 证明收益，再考虑向量库和 embedding 依赖。",
+          "Corpus 来源必须可审计，避免把答案或私有评测信息摄入。"
+        ]
+      }
+    };
+
+    const modules = {
+      cli: {
+        title: "cli.py",
+        path: "src/data_agent_langchain/cli.py",
+        summary: "本地开发入口，提供 run-task、run-benchmark、gateway-smoke 等命令。",
+        responsibilities: ["读取本地 YAML 配置。", "触发单任务或批量 benchmark。", "本地调试 gateway 能力。"],
+        integration: ["未来可添加 `--memory-mode disabled|read_only_dataset|full`。", "RAG ingest 可以独立做成 CLI 子命令。"],
+        warnings: ["不要在 CLI 参数或 YAML 中硬编码 API Key。", "本地配置与容器 submission 路径要保持协议一致。"]
+      },
+      submission: {
+        title: "submission.py",
+        path: "src/data_agent_langchain/submission.py",
+        summary: "容器提交入口，生产路径只读 MODEL_* 环境变量和硬编码容器路径。",
+        responsibilities: ["构造提交态 AppConfig。", "校验 gateway caps。", "为每个任务写占位 prediction.csv 并隔离异常。"],
+        integration: ["评测态默认应使用 `memory.mode=read_only_dataset` 或 `disabled`。", "如启用 RAG，必须保证 corpus 已随镜像或输入被审计。"],
+        warnings: ["容器路径不应读取本地 YAML。", "不要把 memory store 中的敏感内容打进镜像。"]
+      },
+      runner: {
+        title: "run/runner.py",
+        path: "src/data_agent_langchain/run/runner.py",
+        summary: "运行编排中心：任务加载、图选择、并发、子进程隔离和落盘都在这里。",
+        responsibilities: ["构造初始 RunState。", "根据 graph_mode 编译 ReAct 或 Plan-and-Solve 图。", "注入 MetricsCollector 与 callbacks。", "输出 trace.json、metrics.json、summary.json。"],
+        integration: ["可在子进程入口构造 MemoryStore / Retriever factory。", "可把 memory recall summary 汇总进 metrics。"],
+        warnings: ["不要把不可 pickle 对象塞进 RunState。", "并发运行时 MemoryStore 后端要考虑文件锁或 append-only 写入。"]
+      },
+      config: {
+        title: "config.py",
+        path: "src/data_agent_langchain/config.py",
+        summary: "定义 AppConfig 与子配置，是新增 memory 配置的自然入口。",
+        responsibilities: ["定义 DatasetConfig、ToolsConfig、AgentConfig、RunConfig 等。", "加载 YAML 并叠加 MODEL_* 环境变量。", "执行 reproducible 约束校验。"],
+        integration: ["新增 `MemoryConfig`：mode、store_backend、path、retriever.type、retrieval_max_results。", "在 AppConfig 上添加 `memory: MemoryConfig`。"],
+        warnings: ["新增字段要保持 dataclass 可 pickle。", "评测默认值要保守，建议 `read_only_dataset` 或 `disabled`。"]
+      },
+      llm: {
+        title: "llm/factory.py",
+        path: "src/data_agent_langchain/llm/factory.py",
+        summary: "构造 ChatOpenAI，并根据 gateway_caps 绑定工具。",
+        responsibilities: ["创建 LLM 客户端。", "依据 tool_calling 能力绑定工具。", "控制 parallel_tool_calls 等能力参数。"],
+        integration: ["RAG/Memory 不建议在这里拼 prompt。", "保持 LLM factory 只管模型和工具绑定。"],
+        warnings: ["不要在 LLM factory 中读取 corpus 或 memory store。", "避免把检索逻辑和模型构造耦合。"]
+      },
+      react: {
+        title: "react_graph.py",
+        path: "src/data_agent_langchain/agents/react_graph.py",
+        summary: "ReAct 外层图很薄，只挂载 execution_subgraph 与 finalize。",
+        responsibilities: ["START → execution → finalize → END。", "没有 planner / replanner。", "replan_required 在 ReAct 中直接 finalize。"],
+        integration: ["ReAct 模式的 Memory/RAG 主要在 `model_node` 召回。"],
+        warnings: ["不要为了 Memory 让 ReAct 外层图变复杂，优先改 prompt 构造点。"]
+      },
+      plan: {
+        title: "plan_solve_graph.py",
+        path: "src/data_agent_langchain/agents/plan_solve_graph.py",
+        summary: "Plan-and-Solve 外层图负责 planner、execution、replanner、finalize。",
+        responsibilities: ["首次进入 planner 生成 plan。", "工具失败且预算允许时进入 replanner。", "裁剪 execution 返回的重复 steps。"],
+        integration: ["`planner_node` 是 dataset knowledge 和 corpus RAG 的最佳早期召回点。", "replanner 可召回已知工具失败模式或 dataset facts。"],
+        warnings: ["召回结果不要改变 steps reducer 语义。", "不要把 retriever 句柄放入 state。"]
+      },
+      execution: {
+        title: "execution_subgraph.py",
+        path: "src/data_agent_langchain/agents/execution_subgraph.py",
+        summary: "共享内层 T-A-O 循环，是所有动作执行的主干。",
+        responsibilities: ["model_node 调 LLM。", "parse_action_node 解析动作。", "gate_node 做数据预览门控。", "tool_node 执行工具。", "advance_node 决定下轮或退出。"],
+        integration: ["Memory/RAG 不需要新增图节点即可先接入。", "读：model_node / planner_node；写：tool_node。"],
+        warnings: ["不要在每轮循环里做重型索引构建。", "新增状态字段要遵守 reducer 和 picklability。"]
+      },
+      planner: {
+        title: "planner_node.py",
+        path: "src/data_agent_langchain/agents/planner_node.py",
+        summary: "Plan-and-Solve 的规划入口，也是 Memory/RAG 召回的关键位置。",
+        responsibilities: ["生成初始 plan。", "工具失败后生成 replan。", "把规划结果写成 StepRecord。"],
+        integration: ["在生成 plan 前读取 dataset_knowledge。", "在需要领域知识时读取 corpus RAG。", "把召回摘要传给 planning prompt。"],
+        warnings: ["不要召回上一次任务的答案或完整推理。", "planner 召回应短小，避免挤占执行上下文。"]
+      },
+      model: {
+        title: "model_node.py",
+        path: "src/data_agent_langchain/agents/model_node.py",
+        summary: "负责构造 messages、调用 LLM、写入 raw_response 和单轮缓存。",
+        responsibilities: ["根据 state 选择 ReAct 或 Plan-and-Solve prompt builder。", "调用 LLM 并处理 model retry。", "清理上一轮路由字段。"],
+        integration: ["可在 `_build_messages_for_state` 路径注入 memory facts。", "执行阶段 RAG context 可在 prompts.py 白名单渲染后进入消息。"],
+        warnings: ["不要直接拼接未经审计的 payload。", "tool_calling 与 json_action 的提示词约束不同，注入文本要兼容两种模式。"]
+      },
+      parse: {
+        title: "parse_action.py",
+        path: "src/data_agent_langchain/agents/parse_action.py",
+        summary: "把模型输出解析为 action 与 action_input。",
+        responsibilities: ["解析 tool_calls。", "解析 JSON fenced action。", "处理 parse_error。"],
+        integration: ["通常不需要接 Memory/RAG。", "可保留错误模式给 tool_playbook 的后续分析，但不建议第一版写入。"],
+        warnings: ["不要让 RAG 输出绕过 action schema。", "保持单工具调用约束。"]
+      },
+      gate: {
+        title: "gate.py",
+        path: "src/data_agent_langchain/agents/gate.py",
+        summary: "数据预览门控，防止模型未读数据就直接计算或回答。",
+        responsibilities: ["要求 read_csv / read_json / read_doc / inspect_sqlite_schema 先执行。", "L1/L2/L3 gate block 和 forced list_context。", "维护 discovery_done / preview_done。"],
+        integration: ["dataset_knowledge 可减少 gate 后重复探索，但不应绕过必要数据预览。"],
+        warnings: ["不要因为 memory 命中就默认 preview_done=True。", "Memory facts 只能辅助，不应替代真实上下文检查。"]
+      },
+      tool: {
+        title: "tool_node.py",
+        path: "src/data_agent_langchain/agents/tool_node.py",
+        summary: "执行工具并追加 StepRecord，是结构化 Memory 的最佳写入点。",
+        responsibilities: ["重建 task/runtime/tools。", "执行 action 指向的工具。", "把工具结果写入 StepRecord。", "设置 last_tool_ok / last_error_kind。"],
+        integration: ["工具成功后提取 DatasetKnowledgeRecord。", "read_csv/read_json/inspect_sqlite_schema 可写 schema facts。", "full 模式下可写 ToolPlaybookRecord。"],
+        warnings: ["只在 result.ok 时写入。", "不要写 question、answer、approach、hint、summary。", "并发写 JSONL 时要避免记录损坏。"]
+      },
+      advance: {
+        title: "advance_node.py",
+        path: "src/data_agent_langchain/agents/advance_node.py",
+        summary: "纯 state 决策节点，决定继续循环、完成或触发 replan。",
+        responsibilities: ["answer 或 terminal tool 后 done。", "max_steps 后 done。", "tool_error / timeout / validation 可触发 replan。", "Plan-and-Solve 成功时推进 plan_index。"],
+        integration: ["通常不接 Memory/RAG。", "可在未来根据 memory-aware error kind 调整 replan，但不是 MVP。"],
+        warnings: ["不要在这里做 I/O。", "保持它是纯决策节点，方便测试。"]
+      },
+      finalize: {
+        title: "finalize.py",
+        path: "src/data_agent_langchain/agents/finalize.py",
+        summary: "把最终 state 转成 AgentRunResult，并处理失败原因。",
+        responsibilities: ["构造最终 answer / failure_reason。", "输出 trace 所需结构。"],
+        integration: ["可在结果 summary 中展示 memory recall audit 摘要。"],
+        warnings: ["不要在 finalize 写长期记忆，否则容易把答案和结果泄露到跨 task memory。"]
+      },
+      tools: {
+        title: "tools/",
+        path: "src/data_agent_langchain/tools/",
+        summary: "提供 DABench 工具：answer、read_csv、read_json、read_doc、execute_python、SQL 等。",
+        responsibilities: ["封装安全的文件读取、SQL、Python 执行和最终回答。", "通过 factory 固定顺序创建工具。"],
+        integration: ["不建议让单个工具直接依赖 MemoryStore。", "由 tool_node 统一根据工具 observation 写结构化知识。"],
+        warnings: ["工具层保持纯工具职责，避免跨任务状态泄漏。"]
+      },
+      state: {
+        title: "runtime/state.py",
+        path: "src/data_agent_langchain/runtime/state.py",
+        summary: "LangGraph RunState 定义，所有字段必须可 pickle。",
+        responsibilities: ["保存 task 标识、mode、steps、answer、gate 状态、单轮缓存、路由字段。", "steps 使用 operator.add reducer。"],
+        integration: ["只可新增轻量 `memory_hits` summary。", "不要放 MemoryStore、Retriever、Writer、Path、BaseTool 等对象。"],
+        warnings: ["破坏 picklability 会影响子进程和 checkpointer。", "新增 reducer 字段要明确合并语义。"]
+      },
+      working: {
+        title: "memory/working.py",
+        path: "src/data_agent_langchain/memory/working.py",
+        summary: "当前已有的 working memory：只负责单 run scratchpad 渲染和上下文裁剪。",
+        responsibilities: ["把 StepRecord 渲染成 LangChain messages。", "pin 数据预览步骤。", "sanitize 错误步骤 raw_response。"],
+        integration: ["长期 Memory 应新增独立文件，不要塞进 working.py。", "working memory 与 dataset_knowledge / corpus memory 分层。"],
+        warnings: ["不要把 working memory 误解成跨 task 记忆。", "不要让它读写外部 KV store。"]
+      },
+      observability: {
+        title: "observability/",
+        path: "src/data_agent_langchain/observability/",
+        summary: "负责事件、metrics、tracer、gateway caps 和报告聚合。",
+        responsibilities: ["记录工具调用、gate block、tokens、summary。", "gateway smoke 探测能力。", "聚合 metrics。"],
+        integration: ["新增 `memory_recall` 自定义事件。", "metrics 中记录 namespace、k、hit_ids、reason。"],
+        warnings: ["audit 信息要脱敏，不写 payload 全文和密钥。"]
+      }
+    };
+
+    function renderStage(stageKey) {
+      const stage = stages[stageKey];
+      document.getElementById("stage-title").textContent = stage.title;
+      document.getElementById("stage-recommendation-title").textContent = stageKey === "current" ? "理解时抓住这些不变量" : "推荐理由";
+      renderList("stage-points", stage.points);
+      renderList("stage-recommendations", stage.recommendations);
+      document.querySelectorAll(".stage-card").forEach(card => {
+        card.classList.toggle("active", card.dataset.stage === stageKey);
+      });
+    }
+
+    function renderModule(moduleKey) {
+      const module = modules[moduleKey];
+      if (!module) return;
+      document.getElementById("module-title").textContent = module.title;
+      document.getElementById("module-path").textContent = module.path;
+      document.getElementById("module-summary").textContent = module.summary;
+      renderList("module-responsibilities", module.responsibilities);
+      renderList("module-integration", module.integration);
+      renderList("module-warnings", module.warnings);
+      document.querySelectorAll(".module").forEach(card => {
+        card.classList.toggle("active", card.dataset.module === moduleKey);
+      });
+    }
+
+    function renderList(id, items) {
+      const node = document.getElementById(id);
+      node.innerHTML = "";
+      items.forEach(item => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        node.appendChild(li);
+      });
+    }
+
+    function showView(viewId) {
+      document.querySelectorAll(".view-panel").forEach(panel => {
+        panel.classList.toggle("hidden", panel.id !== viewId);
+      });
+      document.querySelectorAll("[data-view]").forEach(button => {
+        button.classList.toggle("active", button.dataset.view === viewId);
+      });
+    }
+
+    document.querySelectorAll(".stage-card").forEach(card => {
+      card.addEventListener("click", () => renderStage(card.dataset.stage));
+    });
+
+    document.querySelectorAll(".module").forEach(card => {
+      card.addEventListener("click", () => renderModule(card.dataset.module));
+    });
+
+    document.querySelectorAll("[data-view]").forEach(button => {
+      button.addEventListener("click", () => showView(button.dataset.view));
+    });
+
+    document.querySelectorAll("[data-scroll]").forEach(button => {
+      button.addEventListener("click", () => {
+        const target = document.getElementById(button.dataset.scroll);
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+        document.querySelectorAll("[data-scroll]").forEach(item => item.classList.remove("active"));
+        button.classList.add("active");
+      });
+    });
+
+    renderStage("current");
+    renderModule("planner");
+  </script>
+</body>
+</html>
