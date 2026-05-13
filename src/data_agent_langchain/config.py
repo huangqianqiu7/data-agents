@@ -1,9 +1,9 @@
 """
 LangGraph 后端的 ``AppConfig`` 与 YAML 配置加载工具。
 
-包含 6 个 frozen dataclass：``DatasetConfig`` / ``ToolsConfig`` /
+包含 7 个 frozen dataclass：``DatasetConfig`` / ``ToolsConfig`` /
 ``AgentConfig`` / ``RunConfig`` / ``ObservabilityConfig`` /
-``EvaluationConfig``，以及汇总它们的 :class:`AppConfig`。所有 dataclass
+``EvaluationConfig`` / ``MemoryConfig``，以及汇总它们的 :class:`AppConfig`。所有 dataclass
 都是 ``frozen=True, slots=True``，保证 picklable + immutable，与 legacy
 backend 约定一致。
 
@@ -276,15 +276,19 @@ def _resolve_config_paths(payload: dict[str, Any]) -> dict[str, Any]:
     dataset = dict(result.get("dataset", {}))
     run = dict(result.get("run", {}))
     observability = dict(result.get("observability", {}))
+    memory = dict(result.get("memory", {}))
     if "root_path" in dataset:
         dataset["root_path"] = _path_value(dataset["root_path"])
     if "output_dir" in run:
         run["output_dir"] = _path_value(run["output_dir"])
     if "gateway_caps_path" in observability:
         observability["gateway_caps_path"] = _path_value(observability["gateway_caps_path"])
+    if "path" in memory:
+        memory["path"] = _path_value(memory["path"])
     result["dataset"] = dataset
     result["run"] = run
     result["observability"] = observability
+    result["memory"] = memory
     return result
 
 
