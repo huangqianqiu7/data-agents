@@ -1,7 +1,7 @@
 """Append-only JSONL MemoryStore implementation.
 
-Each namespace maps to one file. `_safe_filename` replaces `:` and `/` with
-`__` to avoid path traversal. Deletes are represented with tombstone rows.
+Each namespace maps to one file. `_safe_filename` replaces `:`, `/`, and `\\`
+with `__` to avoid path traversal. Deletes are represented with tombstone rows.
 """
 from __future__ import annotations
 
@@ -15,7 +15,9 @@ from data_agent_langchain.memory.base import MemoryRecord, RecordKind
 
 
 def _safe_filename(namespace: str) -> str:
-    return namespace.replace(":", "__").replace("/", "__") + ".jsonl"
+    return (
+        namespace.replace(":", "__").replace("/", "__").replace("\\", "__") + ".jsonl"
+    )
 
 
 def _record_to_json(rec: MemoryRecord) -> str:

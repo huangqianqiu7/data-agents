@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from data_agent_langchain.memory.base import MemoryRecord
-from data_agent_langchain.memory.stores.jsonl import JsonlMemoryStore
+from data_agent_langchain.memory.stores.jsonl import JsonlMemoryStore, _safe_filename
 
 
 def test_put_then_list(tmp_path: Path):
@@ -118,3 +118,32 @@ def test_put_after_delete_reactivates_record(tmp_path: Path):
     assert len(results) == 1
     assert results[0].id == "a"
     assert results[0].payload["v"] == 2
+
+
+def test_safe_filename_replaces_windows_separators():
+    filename = _safe_filename("dataset\\..\\outside")
+
+    assert "\\" not in filename
+    assert "/" not in filename
+    assert filename == "dataset__..__outside.jsonl"
+
+
+def test_windows_namespace_separator_cannot_escape_root(tmp_path: Path):
+    store = JsonlMemoryStore(root=tmp_path)
+    escaped = tmp_path.parent / "jsonl_store_escape_probe.jsonl"
+    assert not escaped.exists()
+
+    store.put(
+        MemoryRecord(
+            id="a",
+            namespace="..\\jsonl_store_escape_probe",
+            kind="dataset_knowledge",
+            payload={},
+        )
+    )
+
+    assert not escaped.exists()
+    files = list(tmp_path.iterdir())
+    assert len(files) == 1
+    assert files[0].is_file()
+    assert files[0].name == "..__jsonl_store_escape_probe.jsonl"
