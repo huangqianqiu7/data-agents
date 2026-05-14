@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
 from typing import Annotated, Iterator, TYPE_CHECKING
@@ -168,9 +169,15 @@ def run_task_command(
     task_id: Annotated[str, typer.Argument(help="Task id such as task_1.")],
     config: Annotated[Path, typer.Option("--config", "-c", help="YAML config path.")],
     graph_mode: Annotated[str, typer.Option("--graph-mode", help="react or plan_solve.")] = "plan_solve",
+    memory_mode: Annotated[
+        str | None,
+        typer.Option("--memory-mode", help="Override memory mode for this run."),
+    ] = None,
 ) -> None:
     """对单个任务跑一次 LangGraph 后端。"""
     cfg = load_app_config(config)
+    if memory_mode is not None:
+        cfg = replace(cfg, memory=replace(cfg.memory, mode=memory_mode))
     _, run_output_dir = create_run_output_dir(cfg.run.output_dir, run_id=cfg.run.run_id)
     artifact = run_single_task(
         task_id=task_id,
@@ -187,6 +194,10 @@ def run_benchmark_command(
     config: Annotated[Path, typer.Option("--config", "-c", help="YAML config path.")],
     limit: Annotated[int | None, typer.Option("--limit", help="Limit number of tasks.")] = None,
     graph_mode: Annotated[str, typer.Option("--graph-mode", help="react or plan_solve.")] = "plan_solve",
+    memory_mode: Annotated[
+        str | None,
+        typer.Option("--memory-mode", help="Override memory mode for this run."),
+    ] = None,
     progress: Annotated[
         bool,
         typer.Option(
@@ -197,6 +208,9 @@ def run_benchmark_command(
 ) -> None:
     """对整套任务跑一遍并产出批量 summary.json。默认进度条可用 ``--no-progress`` 关闭。"""
     cfg = load_app_config(config)
+
+    if memory_mode is not None:
+        cfg = replace(cfg, memory=replace(cfg.memory, mode=memory_mode))
 
     # 估算 task_total：仅用于进度条；load_app_config 后这里能访问 dataset_root。
     if progress:
