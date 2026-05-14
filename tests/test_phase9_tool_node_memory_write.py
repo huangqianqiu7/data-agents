@@ -19,6 +19,17 @@ def _state_for_read_csv() -> RunState:
     }
 
 
+def _write_task(dataset_root: Path) -> tuple[Path, Path]:
+    task_dir = dataset_root / "task_test"
+    context_dir = task_dir / "context"
+    context_dir.mkdir(parents=True)
+    (task_dir / "task.json").write_text(
+        '{"task_id": "task_test", "difficulty": "easy", "question": "Q?"}',
+        encoding="utf-8",
+    )
+    return task_dir, context_dir
+
+
 def test_tool_node_writes_dataset_knowledge_on_success(tmp_path: Path, monkeypatch):
     from data_agent_langchain.agents import tool_node as tn
 
@@ -56,13 +67,7 @@ def test_real_tool_node_writes_memory_on_success(tmp_path: Path, monkeypatch):
     from data_agent_langchain.agents import tool_node as tn
 
     dataset_root = tmp_path / "dataset_ds"
-    task_dir = dataset_root / "task_test"
-    context_dir = task_dir / "context"
-    context_dir.mkdir(parents=True)
-    (task_dir / "task.json").write_text(
-        '{"task_id": "task_test", "difficulty": "easy", "question": "Q?"}',
-        encoding="utf-8",
-    )
+    task_dir, context_dir = _write_task(dataset_root)
     (context_dir / "transactions.csv").write_text(
         "date,amount\n2026-01-01,10\n", encoding="utf-8"
     )
@@ -102,13 +107,7 @@ def test_real_tool_node_writes_sqlite_schema_memory(tmp_path: Path, monkeypatch)
     from data_agent_langchain.agents import tool_node as tn
 
     dataset_root = tmp_path / "dataset_sqlite"
-    task_dir = dataset_root / "task_test"
-    context_dir = task_dir / "context"
-    context_dir.mkdir(parents=True)
-    (task_dir / "task.json").write_text(
-        '{"task_id": "task_test", "difficulty": "easy", "question": "Q?"}',
-        encoding="utf-8",
-    )
+    task_dir, context_dir = _write_task(dataset_root)
     db_path = context_dir / "sample.db"
     with sqlite3.connect(db_path) as conn:
         conn.execute("CREATE TABLE sales (id INTEGER, amount REAL)")
@@ -145,6 +144,91 @@ def test_real_tool_node_writes_sqlite_schema_memory(tmp_path: Path, monkeypatch)
         "sales": "CREATE TABLE sales (id INTEGER, amount REAL)"
     }
     assert recs[0].payload["sample_columns"] == ["sales"]
+
+
+def test_tool_node_non_dataset_success_does_not_initialize_memory(
+    tmp_path: Path, monkeypatch
+):
+    from data_agent_langchain.agents import tool_node as tn
+    from data_agent_langchain.memory import factory as memory_factory
+
+    dataset_root = tmp_path / "dataset_ds"
+    task_dir, context_dir = _write_task(dataset_root)
+    cfg = replace(
+        default_app_config(),
+        memory=MemoryConfig(mode="full", path=tmp_path / "memory"),
+    )
+    monkeypatch.setattr(tn, "_safe_get_app_config", lambda: cfg)
+
+    def fail_build_store(_memory_cfg):
+        raise AssertionError("non-dataset tools should not initialize memory")
+
+    monkeypatch.setattr(memory_factory, "build_store", fail_build_store)
+
+    update = tn.tool_node(
+        {
+            "task_id": "task_test",
+            "question": "Q?",
+            "dataset_root": str(dataset_root),
+            "context_dir": str(context_dir),
+            "task_dir": str(task_dir),
+            "action": "list_context",
+            "action_input": {"max_depth": 2},
+            "step_index": 1,
+            "skip_tool": False,
+            "last_error_kind": None,
+        }
+    )
+
+    assert update["last_tool_ok"] is True
+    assert update["discovery_done"] is True
+    assert not cfg.memory.path.exists()
+
+
+def test_tool_node_memory_write_failure_does_not_fail_tool(
+    tmp_path: Path, monkeypatch
+):
+    from data_agent_langchain.agents import tool_node as tn
+    from data_agent_langchain.memory import factory as memory_factory
+
+    dataset_root = tmp_path / "dataset_ds"
+    task_dir, context_dir = _write_task(dataset_root)
+    (context_dir / "transactions.csv").write_text(
+        "date,amount\n2026-01-01,10\n", encoding="utf-8"
+    )
+    cfg = replace(
+        default_app_config(),
+        memory=MemoryConfig(mode="full", path=tmp_path / "memory"),
+    )
+    monkeypatch.setattr(tn, "_safe_get_app_config", lambda: cfg)
+
+    class FailingWriter:
+        def write_dataset_knowledge(self, dataset, record):
+            raise RuntimeError("write failed")
+
+    monkeypatch.setattr(
+        memory_factory, "build_writer", lambda _memory_cfg, *, store: FailingWriter()
+    )
+
+    update = tn.tool_node(
+        {
+            "task_id": "task_test",
+            "question": "Q?",
+            "dataset_root": str(dataset_root),
+            "context_dir": str(context_dir),
+            "task_dir": str(task_dir),
+            "action": "read_csv",
+            "action_input": {"path": "transactions.csv", "max_rows": 5},
+            "step_index": 1,
+            "skip_tool": False,
+            "last_error_kind": None,
+        }
+    )
+
+    assert update["last_tool_ok"] is True
+    assert update["preview_done"] is True
+    [step] = update["steps"]
+    assert step.ok is True
 
 
 def test_maybe_write_skips_non_dataset_actions(tmp_path: Path):

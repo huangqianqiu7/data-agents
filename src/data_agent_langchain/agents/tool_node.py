@@ -125,7 +125,11 @@ def tool_node(state: RunState, config: Any | None = None) -> dict[str, Any]:
         if action in DATA_PREVIEW_ACTIONS:
             update["preview_done"] = True
         memory_cfg = getattr(app_config, "memory", None)
-        if memory_cfg is not None and memory_cfg.mode != "disabled":
+        if (
+            action in _DATASET_KNOWLEDGE_ACTIONS
+            and memory_cfg is not None
+            and memory_cfg.mode != "disabled"
+        ):
             try:
                 from data_agent_langchain.memory.factory import build_store, build_writer
 
