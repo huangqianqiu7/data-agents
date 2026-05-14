@@ -20,6 +20,7 @@ from typing import Any
 
 from langchain_core.runnables import Runnable
 
+from data_agent_langchain.agents.corpus_recall import recall_corpus_snippets
 from data_agent_langchain.agents.json_parser import parse_plan
 from data_agent_langchain.agents.memory_recall import recall_dataset_facts
 from data_agent_langchain.agents.model_retry import extract_raw_response
@@ -53,12 +54,20 @@ def planner_node(state: RunState, config: Any | None = None) -> dict[str, Any]:
     }
     app_config = _safe_get_app_config()
     dataset_name = Path(state.get("dataset_root", "") or ".").name or "default"
-    memory_hits = recall_dataset_facts(
+    dataset_hits = recall_dataset_facts(
         memory_cfg=app_config.memory,
         dataset=dataset_name,
         node="planner_node",
         config=config,
     )
+    corpus_hits = recall_corpus_snippets(
+        app_config.memory.rag,
+        task_id=str(state.get("task_id") or ""),
+        query=str(state.get("question") or ""),
+        node="planner_node",
+        config=config,
+    )
+    memory_hits = list(dataset_hits) + list(corpus_hits)
     if memory_hits:
         output["memory_hits"] = memory_hits
     return output
