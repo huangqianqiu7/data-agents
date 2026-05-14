@@ -37,6 +37,9 @@ class MetricsCollector(BaseCallbackHandler):
         self._parse_errors = 0
         self._model_errors = 0
         self._memory_recalls: list[dict] = []
+        self._memory_rag_index_built: dict | None = None
+        self._memory_rag_recall_count: dict[str, int] = {}
+        self._memory_rag_skipped: dict[str, int] = {}
 
     def on_llm_end(self, response, **kwargs) -> None:
         usage = getattr(response, "llm_output", {}) or {}
@@ -60,7 +63,18 @@ class MetricsCollector(BaseCallbackHandler):
         elif name == "model_error":
             self._model_errors += 1
         elif name == "memory_recall":
-            self._memory_recalls.append(dict(data))
+            event = dict(data)
+            self._memory_recalls.append(event)
+            if str(event.get("kind") or "").startswith("corpus_"):
+                node = _normalise_rag_node(str(event.get("node") or "unknown"))
+                self._memory_rag_recall_count[node] = (
+                    self._memory_rag_recall_count.get(node, 0) + 1
+                )
+        elif name == "memory_rag_index_built":
+            self._memory_rag_index_built = dict(data)
+        elif name == "memory_rag_skipped":
+            reason = str(data.get("reason") or "unknown")
+            self._memory_rag_skipped[reason] = self._memory_rag_skipped.get(reason, 0) + 1
         elif name == "tool_call":
             tool = str(data.get("tool") or "unknown")
             self._tool_counts[tool] = self._tool_counts.get(tool, 0) + 1
@@ -87,11 +101,37 @@ class MetricsCollector(BaseCallbackHandler):
             "memory_recalls": list(self._memory_recalls),
             "wall_clock_s": round(perf_counter() - self._start_t, 6),
         }
+        memory_rag = self._build_memory_rag_payload()
+        if memory_rag is not None:
+            payload["memory_rag"] = memory_rag
         self._output_dir.mkdir(parents=True, exist_ok=True)
         (self._output_dir / "metrics.json").write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+
+    def _build_memory_rag_payload(self) -> dict | None:
+        """聚合 corpus RAG 事件；无 RAG 事件时返回 ``None`` 保持 baseline 稳定。"""
+        has_rag_event = bool(
+            self._memory_rag_index_built
+            or self._memory_rag_recall_count
+            or self._memory_rag_skipped
+        )
+        if not has_rag_event:
+            return None
+
+        built = self._memory_rag_index_built or {}
+        return {
+            "task_index_built": bool(self._memory_rag_index_built),
+            "task_doc_count": int(built.get("doc_count", 0) or 0),
+            "task_chunk_count": int(built.get("chunk_count", 0) or 0),
+            "shared_collections_loaded": 0,
+            "recall_count": dict(sorted(self._memory_rag_recall_count.items())),
+            "skipped": [
+                {"reason": reason, "count": count}
+                for reason, count in sorted(self._memory_rag_skipped.items())
+            ],
+        }
 
 
 def _tool_name_from_output(output) -> str | None:
@@ -106,6 +146,13 @@ def _tool_name_from_output(output) -> str | None:
         return None
     raw_name = payload.get("tool_name") or payload.get("action")
     return str(raw_name) if raw_name else None
+
+
+def _normalise_rag_node(node: str) -> str:
+    """把内部函数名归一化为 metrics 中较短的入口名。"""
+    if node.endswith("_node"):
+        return node[: -len("_node")]
+    return node
 
 
 __all__ = ["MetricsCollector"]
