@@ -50,6 +50,19 @@ dev = [
     "pytest>=8.3.5",
     "ruff>=0.11.0",
 ]
+# v3 corpus RAG（M4.4.2 / D3 / C2）：仅在显式 ``pip install ".[rag]"`` 时安装。
+# - sentence-transformers：HarrierEmbedder 后端（默认承载 microsoft/harrier-oss-v1-270m）。
+# - chromadb：ChromaCorpusStore 向量库后端（仅 ephemeral 模式，子进程内存索引）。
+#   选 1.x 是因为 conda-forge 仅为 1.0+ 提供 Windows py313 预编译二进制；0.5.x/0.6.x
+#   在 py313 上必须从源码编译，要求 MSVC Build Tools。1.x 已稳定，本计划用到的
+#   核心 API（EphemeralClient/Settings/create_collection/upsert/query）均兼容。
+# - torch 由 sentence-transformers 间接拉；如评测镜像需要严格 pin，可在此追加。
+# 提交镜像（不带 RAG）安装 ``pip install .`` 即可，体积零增量；
+# 启用 RAG 评测时改为 ``pip install ".[rag]"``。
+rag = [
+    "sentence-transformers>=3,<4",
+    "chromadb>=1.0,<2",
+]
 
 [project.scripts]
 # v5 §二.8.4：删除过期 dabench entry point（指向已归档 baseline 包，会
@@ -78,3 +91,10 @@ src = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# v3 corpus RAG（M4.0.2）：opt-in 慢测试 marker。
+# - ``slow`` 标记的用例默认 skip，需要传 ``--runslow`` 才运行。
+# - 适用场景：M4.2.2 HarrierEmbedder 真权重加载测试等需要本地 GPU/HF 缓存的集成测试。
+# 钩子实现见 ``tests/conftest.py``。
+markers = [
+    "slow: opt-in slow integration tests; require --runslow flag to run",
+]

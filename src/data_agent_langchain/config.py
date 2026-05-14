@@ -20,9 +20,11 @@ backend 约定一致。
 from __future__ import annotations
 
 import os
+import types
+import typing
 from dataclasses import fields, is_dataclass, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args, get_origin
 
 import yaml
 
@@ -124,6 +126,75 @@ class AgentConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CorpusRagConfig:
+    """v3 corpus RAG 配置（``01-design-v2.md §4.3``）。
+
+    挂在 :class:`MemoryConfig.rag` 下；与 ``memory.mode`` 三态运行开关交叉决定
+    实际行为：
+
+      - ``memory.mode=disabled`` → 无论 ``rag.enabled`` 如何都强制关闭 RAG。
+      - ``memory.mode=read_only_dataset`` 或 ``full`` 时 ``rag.enabled=true``
+        才走 corpus 召回路径。
+
+    所有字段都用 dataclass 默认值；``CorpusRagConfig()`` 等价于"禁用 corpus
+    RAG，但保留所有合理默认参数等待开关打开"。
+    """
+
+    # ----- 总开关 -----
+    # 全局开关；``memory.mode=disabled`` 时被强制视为 False。
+    enabled: bool = False
+    # L1：当前 task 的文档（M4 唯一实现）。
+    task_corpus: bool = True
+    # L2：维护方策划的只读语料（M4 占位，``05-shared-corpus-design.md`` 落地）。
+    shared_corpus: bool = False
+    shared_collections: tuple[str, ...] = ()
+    # M4 不使用；保留供 shared corpus 独立提案。
+    shared_path: Path | None = None
+
+    # ----- 索引 -----
+    chunk_size_chars: int = 1200
+    chunk_overlap_chars: int = 200
+    max_chunks_per_doc: int = 200
+    max_docs_per_task: int = 100
+    task_corpus_index_timeout_s: float = 30.0
+
+    # ----- Embedding -----
+    embedder_backend: Literal["sentence_transformer", "stub"] = "sentence_transformer"
+    embedder_model_id: str = "microsoft/harrier-oss-v1-270m"
+    embedder_device: Literal["cpu", "cuda", "auto"] = "cpu"
+    embedder_dtype: Literal["float32", "float16", "auto"] = "auto"
+    embedder_query_prompt_name: str = "web_search_query"
+    embedder_max_seq_len: int = 1024
+    embedder_batch_size: int = 8
+    # ``None`` 走 HF 默认 ``HF_HOME``；评测镜像可指向 ``/opt/models/hf``。
+    embedder_cache_dir: Path | None = None
+
+    # ----- 向量库 -----
+    vector_backend: Literal["chroma"] = "chroma"
+    vector_distance: Literal["cosine", "ip", "l2"] = "cosine"
+
+    # ----- 检索 -----
+    retrieval_k: int = 4
+    prompt_budget_chars: int = 1800
+
+    # ----- 内容过滤（``Redactor`` 使用）-----
+    # 命中任一 pattern 的整段文档将被丢弃；patterns 自带 ``(?i)`` 保证大小写不敏感。
+    redact_patterns: tuple[str, ...] = (
+        r"(?i)\banswer\b",
+        r"(?i)\bhint\b",
+        r"(?i)\bapproach\b",
+        r"(?i)\bsolution\b",
+    )
+    # 命中任一 glob 的文件名将被跳过。
+    redact_filenames: tuple[str, ...] = (
+        "expected_output.json",
+        "ground_truth*",
+        "*label*",
+        "*solution*",
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryConfig:
     """Cross-task memory configuration (v2 design section 4.2)."""
     mode: str = "disabled"                          # disabled | read_only_dataset | full
@@ -133,6 +204,8 @@ class MemoryConfig:
     )
     retriever_type: str = "exact"
     retrieval_max_results: int = 5
+    # v3 corpus RAG 嵌套子配置（``01-design-v2.md §4.3``）；M4.4.1 引入。
+    rag: CorpusRagConfig = field(default_factory=CorpusRagConfig)
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,28 +388,89 @@ def _to_plain_dict(value: Any) -> Any:
     return value
 
 
+def _is_path_hint(hint: Any) -> bool:
+    """判断类型 hint 是否为 ``Path`` 或 ``Path | None`` / ``Optional[Path]``。
+
+    支持两种 Union 形式：
+
+      - ``typing.Union[Path, None]`` / ``Optional[Path]`` —— ``get_origin`` 是
+        ``typing.Union``。
+      - ``Path | None`` （PEP 604，Python 3.10+）—— ``get_origin`` 是
+        ``types.UnionType``。
+    """
+    if hint is Path:
+        return True
+    origin = get_origin(hint)
+    union_origins: tuple[Any, ...] = (typing.Union,)
+    union_type = getattr(types, "UnionType", None)
+    if union_type is not None:
+        union_origins = union_origins + (union_type,)
+    if origin in union_origins:
+        return any(arg is Path for arg in get_args(hint))
+    return False
+
+
 def _dataclass_from_dict(cls: type[Any], payload: dict[str, Any]) -> Any:
-    """与 :func:`_to_plain_dict` 互逆：把纯字典塞进 dataclass。"""
+    """与 :func:`_to_plain_dict` 互逆：把纯字典塞进 dataclass。
+
+    支持的字段形状（按优先级匹配）：
+
+      1. ``Path`` / ``Path | None`` / ``Optional[Path]`` 类型：value 为 ``None`` 时
+         保持 ``None``，否则 ``Path(value)``。识别基于 ``typing.get_type_hints``
+         解析后的真实类型，无需字段名硬编码。
+      2. ``model_retry_backoff``：list → ``tuple[float, ...]``（向后兼容）。
+      3. 嵌套 dataclass：``value`` 是 dict 时递归构造（v3 ``MemoryConfig.rag``）。
+      4. 通用 ``tuple[T, ...]``：list → tuple（v3 ``CorpusRagConfig.shared_collections``
+         / ``redact_patterns`` / ``redact_filenames``）。元素类型不强转。
+      5. 其他类型（含 ``Literal[...]`` / 基本类型）：原样传入，dataclass 不做强
+         校验，保持现状。
+
+    ``from __future__ import annotations`` 下 ``field_info.type`` 是字符串，
+    必须用 ``typing.get_type_hints(cls)`` 解析为真实类型，才能识别嵌套
+    dataclass / ``tuple[T, ...]`` / ``Path | None`` 等结构化注解。
+    """
+    type_hints = typing.get_type_hints(cls)
     kwargs: dict[str, Any] = {}
     for field_info in fields(cls):
         if field_info.name not in payload:
             continue
         value = payload[field_info.name]
-        if field_info.name in {"root_path", "output_dir", "gateway_caps_path", "path"}:
-            value = Path(value)
-        elif field_info.name == "model_retry_backoff":
-            value = tuple(float(item) for item in value)
-        kwargs[field_info.name] = value
+        hint = type_hints.get(field_info.name)
+        kwargs[field_info.name] = _coerce_field(field_info.name, hint, value)
     return cls(**kwargs)
+
+
+def _coerce_field(name: str, hint: Any, value: Any) -> Any:
+    """根据字段名 + 类型 hint 把字典中的 ``value`` 强转回 dataclass 期望类型。"""
+    # 1) Path / Path | None：``Path(None)`` 会爆，None 直通。
+    if _is_path_hint(hint):
+        return None if value is None else Path(value)
+
+    # 2) 显式 tuple[float, ...] 字段（向后兼容；元素需要强转 float）。
+    if name == "model_retry_backoff":
+        return tuple(float(item) for item in value)
+
+    # 3) 嵌套 dataclass：value 是 dict 时递归。
+    if hint is not None and is_dataclass(hint) and isinstance(value, dict):
+        return _dataclass_from_dict(hint, value)
+
+    # 4) 通用 ``tuple[T, ...]``：list → tuple。
+    if hint is not None and get_origin(hint) is tuple and isinstance(value, (list, tuple)):
+        return tuple(value)
+
+    # 5) 其他类型：原样返回。
+    return value
 
 
 __all__ = [
     "AgentConfig",
     "AppConfig",
+    "CorpusRagConfig",
     "DatasetConfig",
     "EvaluationConfig",
     "MemoryConfig",
     "ObservabilityConfig",
+    "PROJECT_ROOT",
     "RunConfig",
     "ToolsConfig",
     "default_app_config",
