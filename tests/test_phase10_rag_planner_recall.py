@@ -99,11 +99,11 @@ def test_planner_node_recalls_dataset_then_corpus_and_merges_hits(
         )
         return [dataset_hit]
 
-    def fake_recall_corpus_snippets(cfg, *, task_id, query, node, config):
+    def fake_recall_corpus_snippets(memory_cfg, *, task_id, query, node, config):
         calls.append(
             {
                 "kind": "corpus",
-                "cfg": cfg,
+                "memory_cfg": memory_cfg,
                 "task_id": task_id,
                 "query": query,
                 "node": node,
@@ -125,7 +125,9 @@ def test_planner_node_recalls_dataset_then_corpus_and_merges_hits(
     assert calls[0]["dataset"] == "ds"
     assert calls[0]["node"] == "planner_node"
     assert calls[0]["config"] is runtime_config
-    assert calls[1]["cfg"] is app_config.memory.rag
+    # Bug 1 修复后 planner 传完整 ``MemoryConfig``（含 mode）而不是 子 cfg ``rag``，
+    # 以便 helper 内部同时按 ``memory.mode`` 守卫。
+    assert calls[1]["memory_cfg"] is app_config.memory
     assert calls[1]["task_id"] == "task_test"
     assert calls[1]["query"] == "question from state"
     assert calls[1]["node"] == "planner_node"
@@ -161,7 +163,7 @@ def test_planner_node_keeps_dataset_only_when_corpus_empty(
     monkeypatch.setattr(
         planner_module,
         "recall_corpus_snippets",
-        lambda cfg, *, task_id, query, node, config: [],
+        lambda memory_cfg, *, task_id, query, node, config: [],
     )
 
     output = planner_module.planner_node(

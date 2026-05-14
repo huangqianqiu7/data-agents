@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from data_agent_langchain.config import CorpusRagConfig
+from data_agent_langchain.config import CorpusRagConfig, MemoryConfig
 from data_agent_langchain.memory.base import MemoryRecord, RetrievalResult
 from data_agent_langchain.runtime.context import (
     clear_current_corpus_handles,
@@ -87,14 +87,18 @@ def _result(
 
 
 def test_recall_returns_empty_when_rag_disabled() -> None:
-    """``cfg.enabled=False`` 时不调用 retriever，直接返回空列表。"""
+    """``rag.enabled=False`` 时不调用 retriever，直接返回空列表。
+
+    Bug 1 修复后签名为 ``MemoryConfig``；本用例 ``mode="read_only_dataset"``
+    让 mode 守卫先放行，再由 ``rag.enabled=False`` 短路。
+    """
     from data_agent_langchain.agents.corpus_recall import recall_corpus_snippets
 
     retriever = SpyRetriever([_result()])
     set_current_corpus_handles(_handles(retriever))
 
     hits = recall_corpus_snippets(
-        CorpusRagConfig(enabled=False),
+        MemoryConfig(mode="read_only_dataset", rag=CorpusRagConfig(enabled=False)),
         task_id="task_1",
         query="where is schema?",
         node="planner",
@@ -110,7 +114,7 @@ def test_recall_returns_empty_without_context_handles() -> None:
     from data_agent_langchain.agents.corpus_recall import recall_corpus_snippets
 
     hits = recall_corpus_snippets(
-        CorpusRagConfig(enabled=True),
+        MemoryConfig(mode="read_only_dataset", rag=CorpusRagConfig(enabled=True)),
         task_id="task_1",
         query="where is schema?",
         node="planner",
@@ -133,10 +137,13 @@ def test_recall_returns_memory_hits_and_dispatches_event(monkeypatch) -> None:
 
     retriever = SpyRetriever([_result(text="schema details for columns")])
     set_current_corpus_handles(_handles(retriever))
-    cfg = CorpusRagConfig(enabled=True, retrieval_k=3)
+    memory_cfg = MemoryConfig(
+        mode="read_only_dataset",
+        rag=CorpusRagConfig(enabled=True, retrieval_k=3),
+    )
 
     hits = corpus_recall.recall_corpus_snippets(
-        cfg,
+        memory_cfg,
         task_id="task_1",
         query="where is schema?",
         node="planner",
@@ -176,7 +183,7 @@ def test_recall_dispatches_skipped_when_retriever_raises(monkeypatch) -> None:
     set_current_corpus_handles(_handles(RaisingRetriever()))
 
     hits = corpus_recall.recall_corpus_snippets(
-        CorpusRagConfig(enabled=True),
+        MemoryConfig(mode="read_only_dataset", rag=CorpusRagConfig(enabled=True)),
         task_id="task_1",
         query="where is schema?",
         node="planner",
@@ -199,10 +206,13 @@ def test_recall_respects_prompt_budget_chars() -> None:
         _result(chunk_id="doc-a#0001", text="second chunk"),
     ])
     set_current_corpus_handles(_handles(retriever))
-    cfg = CorpusRagConfig(enabled=True, prompt_budget_chars=80)
+    memory_cfg = MemoryConfig(
+        mode="read_only_dataset",
+        rag=CorpusRagConfig(enabled=True, prompt_budget_chars=80),
+    )
 
     hits = recall_corpus_snippets(
-        cfg,
+        memory_cfg,
         task_id="task_1",
         query="where is schema?",
         node="planner",

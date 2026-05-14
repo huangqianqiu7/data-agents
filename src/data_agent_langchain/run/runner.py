@@ -42,7 +42,11 @@ from data_agent_langchain.observability.gateway_caps import GatewayCaps
 from data_agent_langchain.observability.metrics import MetricsCollector
 from data_agent_langchain.observability.reporter import aggregate_metrics
 from data_agent_langchain.observability.tracer import build_callbacks
-from data_agent_langchain.runtime.context import set_current_app_config
+from data_agent_langchain.runtime.context import (
+    clear_current_corpus_handles,
+    set_current_app_config,
+    set_current_corpus_handles,
+)
 from data_agent_langchain.runtime.rehydrate import build_runtime
 from data_agent_langchain.runtime.state import RunState
 from data_agent_langchain.tools.factory import create_all_tools
@@ -217,9 +221,19 @@ def _run_single_task_core(
     graph_mode: GraphMode = "plan_solve",
     show_progress: bool = False,
 ) -> dict[str, Any]:
-    """核心执行流程：set contextvar → load task → 编译图 → invoke → build result。"""
+    """核心执行流程：set contextvar → load task → 编译图 → invoke → build result。
+
+    v3 corpus RAG（M4.4.4）：在 ``set_current_app_config`` 之后、
+    ``compiled.invoke`` 之前构建 per-task corpus 索引并写入 contextvar；
+    invoke 完成后无条件清理 contextvar 避免污染。
+    """
     set_current_app_config(config)
     task = DABenchPublicDataset(config.dataset.root_path).get_task(task_id)
+
+    # v3 corpus RAG（M4.4.4）：构建 per-task corpus handles。
+    # 全部异常都被 fail-closed 吞掉：任何 RAG 失败都不应阻塞 task 主流程。
+    _build_and_set_corpus_handles(config, task)
+
     resolved_llm = _llm_for_action_mode(task, config, llm)
     if show_progress:
         print(f"[dabench-lc] Loaded {task.task_id}; mode={graph_mode}; model={config.agent.model}", flush=True)
@@ -232,8 +246,59 @@ def _run_single_task_core(
     }
     if resolved_llm is not None:
         runnable_config["configurable"] = {"llm": resolved_llm}
-    final_state = compiled.invoke(_initial_state_for_task(task, config, mode=graph_mode), config=runnable_config)
+    try:
+        final_state = compiled.invoke(
+            _initial_state_for_task(task, config, mode=graph_mode),
+            config=runnable_config,
+        )
+    finally:
+        # invoke 完成（成功 / 失败）都清理 contextvar，避免同进程下污染后续 task。
+        clear_current_corpus_handles()
     return build_run_result(task_id, final_state).to_dict()
+
+
+def _build_and_set_corpus_handles(config: AppConfig, task: Any) -> None:
+    """为单个 task 构建 corpus handles 并写入 contextvar；fail-closed。
+
+    守卫顺序（``CorpusRagConfig`` docstring 的 mode × rag 决策表）：
+
+      1. ``memory.mode == "disabled"`` → 强制关闭 RAG，不构建索引（Bug 1）。
+      2. ``memory.rag.enabled == False`` → 不构建索引。
+      3. 任何异常 → fail-closed，contextvar 保持 ``None``，task 仍按 baseline
+         路径运行（不抛、不阻塞）。
+    """
+    # Bug 1 守卫：``memory.mode=disabled`` 时无论 ``rag.enabled`` 如何都关闭 RAG，
+    # 与 ``CorpusRagConfig`` docstring 的设计意图对齐。
+    if config.memory.mode == "disabled":
+        return
+    if not config.memory.rag.enabled:
+        return
+    try:
+        # 方法级延迟 import：避免在 ``rag.enabled=false`` 路径触发 factory
+        # 链上的 chromadb / sentence-transformers import。
+        from data_agent_langchain.memory.rag.factory import (
+            build_embedder,
+            build_task_corpus,
+        )
+    except Exception:
+        return
+
+    try:
+        embedder = build_embedder(config.memory.rag)
+        if embedder is None:
+            return
+        handles = build_task_corpus(
+            config.memory.rag,
+            task_id=task.task_id,
+            task_input_dir=task.context_dir,
+            embedder=embedder,
+        )
+    except Exception:
+        # 任何 corpus 构建失败 → fail-closed。事件 dispatch 由 factory 内部完成。
+        return
+
+    if handles is not None:
+        set_current_corpus_handles(handles)
 
 
 def _run_single_task_in_subprocess(

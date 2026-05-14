@@ -4,14 +4,21 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from data_agent_langchain.config import CorpusRagConfig
+from data_agent_langchain.config import MemoryConfig
 from data_agent_langchain.memory.types import MemoryHit
 from data_agent_langchain.observability.events import dispatch_observability_event
 from data_agent_langchain.runtime.context import get_current_corpus_handles
 
 
+# 与 ``agents/memory_recall.py:_RECALL_ENABLED_MODES`` 对齐：仅在
+# ``read_only_dataset`` / ``full`` 两种 mode 下才允许召回；``disabled``
+# 强制关闭 corpus RAG（见 ``CorpusRagConfig`` docstring 的 mode × rag 交叉
+# 决策表）。Bug 1 修复点：之前仅检查 ``cfg.enabled``，与设计意图脱节。
+_RECALL_ENABLED_MODES = frozenset({"read_only_dataset", "full"})
+
+
 def recall_corpus_snippets(
-    cfg: CorpusRagConfig,
+    memory_cfg: MemoryConfig,
     *,
     task_id: str,
     query: str,
@@ -20,9 +27,24 @@ def recall_corpus_snippets(
 ) -> list[MemoryHit]:
     """从当前 task corpus 中召回片段，并转换为 ``RunState.memory_hits`` 可承载的摘要。
 
+    Bug 1 修复后签名扩展为 ``memory_cfg: MemoryConfig``（与
+    ``recall_dataset_facts`` 对称）；内部按以下顺序短路：
+
+      1. ``memory_cfg.mode`` 不在 ``_RECALL_ENABLED_MODES`` 中（如 ``"disabled"``）
+         → returns ``[]``，不调 retriever。
+      2. ``memory_cfg.rag.enabled=False`` → returns ``[]``，不调 retriever。
+      3. ``contextvar`` 无 handles（runner fail-closed 时）→ returns ``[]``。
+      4. ``retrieval_k <= 0`` → returns ``[]``，不调 retriever。
+      5. retriever 异常 → 派发 ``memory_rag_skipped(reason="retrieve_failed")``
+         并 returns ``[]``。
+
     该函数只读取 runner 放进 contextvar 的 ``TaskCorpusHandles``，不会把 query
     写入任何 store；观测事件只记录 ``sha1(query)`` 的短摘要。
     """
+    if memory_cfg.mode not in _RECALL_ENABLED_MODES:
+        return []
+
+    cfg = memory_cfg.rag
     if not cfg.enabled:
         return []
 

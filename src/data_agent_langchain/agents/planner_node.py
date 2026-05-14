@@ -60,8 +60,9 @@ def planner_node(state: RunState, config: Any | None = None) -> dict[str, Any]:
         node="planner_node",
         config=config,
     )
+    # Bug 1 修复：传完整 ``MemoryConfig`` 让 helper 同时按 ``memory.mode`` 守卫。
     corpus_hits = recall_corpus_snippets(
-        app_config.memory.rag,
+        app_config.memory,
         task_id=str(state.get("task_id") or ""),
         query=str(state.get("question") or ""),
         node="planner_node",
