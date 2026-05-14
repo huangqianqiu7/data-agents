@@ -79,3 +79,7 @@ HTML 页面包含五个主要区域：
 - 页面能说明 Memory 与 RAG 的推荐接入点。
 - 页面能说明为什么先做结构化 Memory，再做 RAG。
 - 页面包含风险与测试策略。
+
+---
+
+> **后续**：本文档为 HTML 演示页摘要；技术落地规格见 `2026-05-13-rag-memory-architecture-design-v2.md`，实施计划见 `2026-05-13-rag-memory-architecture-plan-v2.md`。
