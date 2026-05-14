@@ -20,6 +20,7 @@ from langgraph.graph import END, START, StateGraph
 
 from data_agent_langchain.agents.execution_subgraph import build_execution_subgraph
 from data_agent_langchain.agents.finalize import finalize_node
+from data_agent_langchain.agents.task_entry_node import task_entry_node
 from data_agent_langchain.runtime.state import RunState
 
 
@@ -28,9 +29,11 @@ def build_react_graph() -> StateGraph:
     inner = build_execution_subgraph().compile()
 
     g: StateGraph = StateGraph(RunState)
+    g.add_node("task_entry", task_entry_node)
     g.add_node("execution", inner)
     g.add_node("finalize", finalize_node)
-    g.add_edge(START, "execution")
+    g.add_edge(START, "task_entry")
+    g.add_edge("task_entry", "execution")
     g.add_edge("execution", "finalize")
     g.add_edge("finalize", END)
     return g
