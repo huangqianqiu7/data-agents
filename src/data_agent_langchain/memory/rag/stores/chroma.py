@@ -41,6 +41,7 @@ class ChromaCorpusStore:
         "_embedder",
         "_distance",
         "_collection",
+        "_collection_name",
     )
 
     @classmethod
@@ -82,6 +83,10 @@ class ChromaCorpusStore:
         # collection name = ``f"memrag_{sha1(namespace)[:16]}"``（D10）。
         safe = hashlib.sha1(namespace.encode("utf-8")).hexdigest()[:16]
         collection_name = f"memrag_{safe}"
+        # Bug 4：把 collection name 缓存到 slot，``close()`` 调用
+        # ``delete_collection`` 时不再依赖 ``self._collection.name``
+        # （collection 对象在 delete 后再访问属性可能不可靠）。
+        self._collection_name = collection_name
         self._collection = client.get_or_create_collection(
             name=collection_name,
             metadata={"hnsw:space": distance, "ns": namespace},
@@ -186,10 +191,35 @@ class ChromaCorpusStore:
         return out
 
     def close(self) -> None:
-        """释放 chroma client 引用，便于 GC 释放底层 EphemeralClient 资源。
+        """释放 collection 并丢弃 chroma client 引用。
 
-        ``EphemeralClient`` 没有显式 ``close`` API，所以这里只丢弃引用。
+        Bug 4 修复（chromadb EphemeralClient 进程内单例隐患）：
+
+          - chromadb ``EphemeralClient`` 在同一 Python 进程内是单例缓存设计，
+            ``self._client = None`` 仅丢引用并**不会**真正释放底层 collection。
+            collection 仍在进程内累积，跨调用（同 namespace ⇒ 同 collection
+            name = ``memrag_<sha1(namespace)[:16]>``）会继承之前写入的 chunk，
+            导致：(1) 测试隔离失败；(2) 单进程多 task 内存累积；(3) shared /
+            persistent backend 落地后隐患放大。
+          - 修复：在丢引用前显式调 ``client.delete_collection(name=...)``，让
+            collection 在 chroma 内部真正释放。
+
+        守卫顺序：
+
+          1. ``self._client is None`` → ``close()`` 已被调过，幂等 no-op。
+          2. ``client.delete_collection`` 抛任何异常（collection 已不存在 /
+             chroma 内部状态异常等）→ **静默吞掉**，与 store 其他方法的
+             fail-closed 风格一致。
+
+        ``EphemeralClient`` 本身没有显式 ``close`` API，丢引用让 GC 回收。
         """
+        if self._client is None:
+            return
+        try:
+            self._client.delete_collection(name=self._collection_name)
+        except Exception:
+            # delete_collection 抛错不影响 close 语义。
+            pass
         self._client = None
 
 
