@@ -142,6 +142,45 @@ def test_graph_mode_is_plan_solve(monkeypatch):
     assert submission.SUBMISSION_GRAPH_MODE == "plan_solve"
 
 
+def test_submission_memory_rag_defaults_to_disabled(monkeypatch):
+    """提交态默认不启用 corpus RAG，保持 baseline 路径稳定。"""
+    from data_agent_langchain import submission
+
+    monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
+    monkeypatch.delenv("DATA_AGENT_RAG", raising=False)
+
+    cfg = submission.build_submission_config()
+
+    assert cfg.memory.rag.enabled is False
+
+
+def test_submission_memory_rag_env_one_enables(monkeypatch):
+    """``DATA_AGENT_RAG=1`` 应显式启用 corpus RAG。"""
+    from data_agent_langchain import submission
+
+    monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
+    monkeypatch.setenv("DATA_AGENT_RAG", "1")
+
+    cfg = submission.build_submission_config()
+
+    assert cfg.memory.rag.enabled is True
+
+
+def test_submission_memory_rag_env_zero_disables(monkeypatch):
+    """``DATA_AGENT_RAG=0`` 应保持 corpus RAG 关闭。"""
+    from data_agent_langchain import submission
+
+    monkeypatch.setenv("MODEL_API_URL", "http://internal.model/v1")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
+    monkeypatch.setenv("DATA_AGENT_RAG", "0")
+
+    cfg = submission.build_submission_config()
+
+    assert cfg.memory.rag.enabled is False
+
+
 # ---------------------------------------------------------------------------
 # 2026-05-09 v4 §6：统一配置参数收敛断言（V5a / V5b / V6）
 # ---------------------------------------------------------------------------

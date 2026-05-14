@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,6 +23,14 @@ def test_run_task_accepts_memory_mode_flag():
 
     assert result.exit_code == 0
     assert "--memory-mode" in result.output
+
+
+def test_run_task_accepts_memory_rag_flag():
+    result = CliRunner().invoke(app, ["run-task", "--help"])
+
+    assert result.exit_code == 0
+    assert "--memory-rag" in result.output
+    assert "--no-memory-rag" in result.output
 
 
 def test_run_task_memory_mode_flag_overrides_loaded_config(tmp_path: Path, monkeypatch):
@@ -54,6 +63,76 @@ def test_run_task_memory_mode_flag_overrides_loaded_config(tmp_path: Path, monke
 
     assert result.exit_code == 0
     assert seen["memory_mode"] == "full"
+
+
+def test_run_task_memory_rag_flag_enables_loaded_config(tmp_path: Path, monkeypatch):
+    seen = {}
+
+    monkeypatch.setattr(cli_module, "load_app_config", lambda config: default_app_config())
+    monkeypatch.setattr(
+        cli_module,
+        "create_run_output_dir",
+        lambda output_dir, *, run_id=None: ("run1", tmp_path / "run1"),
+    )
+
+    def fake_run_single_task(*, task_id, config, run_output_dir, graph_mode, show_progress):
+        seen["rag_enabled"] = config.memory.rag.enabled
+        return SimpleNamespace(trace_path=tmp_path / "run1" / "task_1" / "trace.json")
+
+    monkeypatch.setattr(cli_module, "run_single_task", fake_run_single_task)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-task",
+            "task_1",
+            "--config",
+            str(tmp_path / "config.yaml"),
+            "--memory-rag",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen["rag_enabled"] is True
+
+
+def test_run_task_no_memory_rag_flag_disables_loaded_config(tmp_path: Path, monkeypatch):
+    seen = {}
+    cfg = default_app_config()
+    cfg = replace(
+        cfg,
+        memory=replace(
+            cfg.memory,
+            rag=replace(cfg.memory.rag, enabled=True),
+        ),
+    )
+
+    monkeypatch.setattr(cli_module, "load_app_config", lambda config: cfg)
+    monkeypatch.setattr(
+        cli_module,
+        "create_run_output_dir",
+        lambda output_dir, *, run_id=None: ("run1", tmp_path / "run1"),
+    )
+
+    def fake_run_single_task(*, task_id, config, run_output_dir, graph_mode, show_progress):
+        seen["rag_enabled"] = config.memory.rag.enabled
+        return SimpleNamespace(trace_path=tmp_path / "run1" / "task_1" / "trace.json")
+
+    monkeypatch.setattr(cli_module, "run_single_task", fake_run_single_task)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-task",
+            "task_1",
+            "--config",
+            str(tmp_path / "config.yaml"),
+            "--no-memory-rag",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen["rag_enabled"] is False
 
 
 def test_run_benchmark_memory_mode_flag_overrides_loaded_config(tmp_path: Path, monkeypatch):

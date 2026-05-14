@@ -17,7 +17,7 @@ from typing import Annotated, Iterator, TYPE_CHECKING
 
 import typer
 
-from data_agent_langchain.config import load_app_config
+from data_agent_langchain.config import AppConfig, load_app_config
 from data_agent_langchain.observability.gateway_smoke import run_gateway_smoke
 from data_agent_langchain.run.runner import (
     TaskRunArtifacts,
@@ -30,6 +30,26 @@ if TYPE_CHECKING:  # pragma: no cover - 仅用于静态类型检查
     pass
 
 app = typer.Typer(help="Run DABench tasks with the LangGraph backend.")
+
+
+def _apply_memory_overrides(
+    cfg: AppConfig,
+    *,
+    memory_mode: str | None,
+    memory_rag: bool | None,
+) -> AppConfig:
+    """按 CLI 显式参数覆盖 memory 配置；``None`` 表示保留 YAML 原值。"""
+    if memory_mode is not None:
+        cfg = replace(cfg, memory=replace(cfg.memory, mode=memory_mode))
+    if memory_rag is not None:
+        cfg = replace(
+            cfg,
+            memory=replace(
+                cfg.memory,
+                rag=replace(cfg.memory.rag, enabled=memory_rag),
+            ),
+        )
+    return cfg
 
 
 # ---------------------------------------------------------------------------
@@ -173,11 +193,17 @@ def run_task_command(
         str | None,
         typer.Option("--memory-mode", help="Override memory mode for this run."),
     ] = None,
+    memory_rag: Annotated[
+        bool | None,
+        typer.Option(
+            "--memory-rag/--no-memory-rag",
+            help="Override corpus RAG enabled flag for this run.",
+        ),
+    ] = None,
 ) -> None:
     """对单个任务跑一次 LangGraph 后端。"""
     cfg = load_app_config(config)
-    if memory_mode is not None:
-        cfg = replace(cfg, memory=replace(cfg.memory, mode=memory_mode))
+    cfg = _apply_memory_overrides(cfg, memory_mode=memory_mode, memory_rag=memory_rag)
     _, run_output_dir = create_run_output_dir(cfg.run.output_dir, run_id=cfg.run.run_id)
     artifact = run_single_task(
         task_id=task_id,
@@ -198,6 +224,13 @@ def run_benchmark_command(
         str | None,
         typer.Option("--memory-mode", help="Override memory mode for this run."),
     ] = None,
+    memory_rag: Annotated[
+        bool | None,
+        typer.Option(
+            "--memory-rag/--no-memory-rag",
+            help="Override corpus RAG enabled flag for this run.",
+        ),
+    ] = None,
     progress: Annotated[
         bool,
         typer.Option(
@@ -209,8 +242,7 @@ def run_benchmark_command(
     """对整套任务跑一遍并产出批量 summary.json。默认进度条可用 ``--no-progress`` 关闭。"""
     cfg = load_app_config(config)
 
-    if memory_mode is not None:
-        cfg = replace(cfg, memory=replace(cfg.memory, mode=memory_mode))
+    cfg = _apply_memory_overrides(cfg, memory_mode=memory_mode, memory_rag=memory_rag)
 
     # 估算 task_total：仅用于进度条；load_app_config 后这里能访问 dataset_root。
     if progress:

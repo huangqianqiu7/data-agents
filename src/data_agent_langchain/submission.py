@@ -33,6 +33,7 @@ import signal
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, Future
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
@@ -152,6 +153,9 @@ def build_submission_config() -> AppConfig:
         )
     api_key = os.environ.get("MODEL_API_KEY") or EMPTY_API_KEY
 
+    rag_enabled = os.environ.get("DATA_AGENT_RAG") == "1"
+    memory_defaults = MemoryConfig()
+
     return AppConfig(
         dataset=DatasetConfig(root_path=DEFAULT_INPUT_DIR),
         agent=AgentConfig(
@@ -163,7 +167,11 @@ def build_submission_config() -> AppConfig:
         observability=ObservabilityConfig(
             gateway_caps_path=DEFAULT_GATEWAY_CAPS_PATH,
         ),
-        memory=MemoryConfig(mode="read_only_dataset"),
+        memory=replace(
+            memory_defaults,
+            mode="read_only_dataset",
+            rag=replace(memory_defaults.rag, enabled=rag_enabled),
+        ),
     )
 
 
@@ -407,8 +415,6 @@ def run(
 
         # 5. 构造 AppConfig（生产路径），测试场景下覆盖关键路径
         config = build_submission_config()
-        from dataclasses import replace  # 局部 import 避免污染顶层
-
         config = replace(
             config,
             dataset=replace(config.dataset, root_path=input_dir),
