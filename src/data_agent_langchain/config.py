@@ -1,9 +1,9 @@
 """
 LangGraph 后端的 ``AppConfig`` 与 YAML 配置加载工具。
 
-包含 6 个 frozen dataclass：``DatasetConfig`` / ``ToolsConfig`` /
+包含 7 个 frozen dataclass：``DatasetConfig`` / ``ToolsConfig`` /
 ``AgentConfig`` / ``RunConfig`` / ``ObservabilityConfig`` /
-``EvaluationConfig``，以及汇总它们的 :class:`AppConfig`。所有 dataclass
+``EvaluationConfig`` / ``MemoryConfig``，以及汇总它们的 :class:`AppConfig`。所有 dataclass
 都是 ``frozen=True, slots=True``，保证 picklable + immutable，与 legacy
 backend 约定一致。
 
@@ -124,6 +124,18 @@ class AgentConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryConfig:
+    """Cross-task memory configuration (v2 design section 4.2)."""
+    mode: str = "disabled"                          # disabled | read_only_dataset | full
+    store_backend: str = "jsonl"                    # jsonl | sqlite (future)
+    path: Path = field(
+        default_factory=lambda: PROJECT_ROOT / "artifacts" / "memory"
+    )
+    retriever_type: str = "exact"
+    retrieval_max_results: int = 5
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     """汇总所有子配置的顶级配置对象。
 
@@ -136,6 +148,7 @@ class AppConfig:
     run: RunConfig = field(default_factory=lambda: RunConfig())
     observability: ObservabilityConfig = field(default_factory=lambda: ObservabilityConfig())
     evaluation: EvaluationConfig = field(default_factory=lambda: EvaluationConfig())
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
 
     def to_dict(self) -> dict[str, Any]:
         """转为可 pickle 的纯字典（``Path`` 转 str、``tuple`` 转 list）。"""
@@ -153,6 +166,7 @@ class AppConfig:
                 ObservabilityConfig, payload.get("observability", {})
             ),
             evaluation=_dataclass_from_dict(EvaluationConfig, payload.get("evaluation", {})),
+            memory=_dataclass_from_dict(MemoryConfig, payload.get("memory", {})),
         )
 
 
@@ -262,15 +276,19 @@ def _resolve_config_paths(payload: dict[str, Any]) -> dict[str, Any]:
     dataset = dict(result.get("dataset", {}))
     run = dict(result.get("run", {}))
     observability = dict(result.get("observability", {}))
+    memory = dict(result.get("memory", {}))
     if "root_path" in dataset:
         dataset["root_path"] = _path_value(dataset["root_path"])
     if "output_dir" in run:
         run["output_dir"] = _path_value(run["output_dir"])
     if "gateway_caps_path" in observability:
         observability["gateway_caps_path"] = _path_value(observability["gateway_caps_path"])
+    if "path" in memory:
+        memory["path"] = _path_value(memory["path"])
     result["dataset"] = dataset
     result["run"] = run
     result["observability"] = observability
+    result["memory"] = memory
     return result
 
 
@@ -304,7 +322,7 @@ def _dataclass_from_dict(cls: type[Any], payload: dict[str, Any]) -> Any:
         if field_info.name not in payload:
             continue
         value = payload[field_info.name]
-        if field_info.name in {"root_path", "output_dir", "gateway_caps_path"}:
+        if field_info.name in {"root_path", "output_dir", "gateway_caps_path", "path"}:
             value = Path(value)
         elif field_info.name == "model_retry_backoff":
             value = tuple(float(item) for item in value)
@@ -317,6 +335,7 @@ __all__ = [
     "AppConfig",
     "DatasetConfig",
     "EvaluationConfig",
+    "MemoryConfig",
     "ObservabilityConfig",
     "RunConfig",
     "ToolsConfig",

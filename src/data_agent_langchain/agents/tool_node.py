@@ -38,11 +38,14 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from data_agent_langchain.agents.gate import DATA_PREVIEW_ACTIONS
 from data_agent_langchain.agents.runtime import StepRecord
 from data_agent_langchain.config import AppConfig, default_app_config
+from data_agent_langchain.memory.records import DatasetKnowledgeRecord
+from data_agent_langchain.memory.writers.store_backed import StoreBackedMemoryWriter
 from data_agent_langchain.observability.events import dispatch_observability_event
 from data_agent_langchain.runtime.context import get_current_app_config
 from data_agent_langchain.runtime.rehydrate import build_runtime, rehydrate_task
@@ -121,6 +124,28 @@ def tool_node(state: RunState, config: Any | None = None) -> dict[str, Any]:
             update["discovery_done"] = True
         if action in DATA_PREVIEW_ACTIONS:
             update["preview_done"] = True
+        memory_cfg = getattr(app_config, "memory", None)
+        if (
+            action in _DATASET_KNOWLEDGE_ACTIONS
+            and memory_cfg is not None
+            and memory_cfg.mode != "disabled"
+        ):
+            try:
+                from data_agent_langchain.memory.factory import build_store, build_writer
+
+                store = build_store(memory_cfg)
+                writer = build_writer(memory_cfg, store=store)
+                dataset_name = Path(state.get("dataset_root", "") or ".").name or "default"
+                content = result.content if isinstance(result.content, dict) else {}
+                _maybe_write_dataset_knowledge(
+                    writer=writer,
+                    dataset=dataset_name,
+                    action=action,
+                    action_input=action_input,
+                    content=content,
+                )
+            except Exception as exc:
+                logger.warning("[tool_node] memory subsystem error: %s", exc)
 
     return update
 
@@ -228,4 +253,134 @@ def _emit_runtime_failure(state: RunState, action: str, msg: str) -> dict[str, A
     }
 
 
-__all__ = ["tool_node"]
+_DATASET_KNOWLEDGE_ACTIONS: dict[str, str] = {
+    "read_csv": "csv",
+    "read_json": "json",
+    "read_doc": "doc",
+    "inspect_sqlite_schema": "sqlite",
+}
+
+
+def _maybe_write_dataset_knowledge(
+    *,
+    writer: StoreBackedMemoryWriter,
+    dataset: str,
+    action: str,
+    action_input: dict[str, Any],
+    content: dict[str, Any],
+) -> None:
+    """Write DatasetKnowledgeRecord after successful preview tools; skip safely on missing fields."""
+    file_kind = _DATASET_KNOWLEDGE_ACTIONS.get(action)
+    if file_kind is None:
+        return
+    file_path = (
+        action_input.get("file_path")
+        or action_input.get("path")
+        or content.get("file_path")
+    )
+    if not isinstance(file_path, str) or not file_path:
+        return
+    schema = _extract_dataset_schema(action, content)
+    if not schema:
+        return
+    row_count = content.get("row_count_estimate")
+    if row_count is None:
+        row_count = content.get("row_count")
+    if not isinstance(row_count, int):
+        row_count = None
+    columns = content.get("columns")
+    if isinstance(columns, list) and columns:
+        sample_columns = [str(c) for c in columns]
+    elif action == "inspect_sqlite_schema":
+        sample_columns = _sqlite_table_names(content)
+    else:
+        sample_columns = []
+    record = DatasetKnowledgeRecord(
+        file_path=file_path,
+        file_kind=file_kind,  # type: ignore[arg-type]
+        schema=schema,
+        row_count_estimate=row_count,
+        sample_columns=sample_columns,
+    )
+    try:
+        writer.write_dataset_knowledge(dataset, record)
+    except Exception as exc:
+        logger.warning("[tool_node] memory write skipped: %s", exc)
+
+
+def _extract_dataset_schema(action: str, content: dict[str, Any]) -> dict[str, str]:
+    schema_src = content.get("dtypes")
+    if schema_src is None:
+        schema_src = content.get("schema")
+    if isinstance(schema_src, dict):
+        return {str(k): str(v) for k, v in schema_src.items() if str(k)}
+    if action == "inspect_sqlite_schema":
+        return _schema_from_sqlite_tables(content)
+    return _infer_schema_from_preview(content)
+
+
+def _schema_from_sqlite_tables(content: dict[str, Any]) -> dict[str, str]:
+    tables = content.get("tables")
+    if not isinstance(tables, list):
+        return {}
+    schema: dict[str, str] = {}
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        name = table.get("name")
+        create_sql = table.get("create_sql")
+        if isinstance(name, str) and name and isinstance(create_sql, str) and create_sql:
+            schema[name] = create_sql
+    return schema
+
+
+def _sqlite_table_names(content: dict[str, Any]) -> list[str]:
+    tables = content.get("tables")
+    if not isinstance(tables, list):
+        return []
+    names: list[str] = []
+    for table in tables:
+        if isinstance(table, dict) and isinstance(table.get("name"), str):
+            names.append(table["name"])
+    return names
+
+
+def _infer_schema_from_preview(content: dict[str, Any]) -> dict[str, str]:
+    columns = content.get("columns")
+    rows = content.get("rows")
+    if not isinstance(columns, list) or not isinstance(rows, list):
+        return {}
+    sample_row = rows[0] if rows else []
+    schema: dict[str, str] = {}
+    for index, column in enumerate(columns):
+        value = (
+            sample_row[index]
+            if isinstance(sample_row, list) and index < len(sample_row)
+            else None
+        )
+        schema[str(column)] = _infer_scalar_type(value)
+    return schema
+
+
+def _infer_scalar_type(value: Any) -> str:
+    if value is None:
+        return "string"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    text = str(value)
+    try:
+        int(text)
+    except ValueError:
+        try:
+            float(text)
+        except ValueError:
+            return "string"
+        return "float"
+    return "int"
+
+
+__all__ = ["tool_node", "_maybe_write_dataset_knowledge"]

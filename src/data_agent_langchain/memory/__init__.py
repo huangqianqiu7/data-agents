@@ -1,20 +1,57 @@
-"""
-LangGraph 后端的记忆层（memory layer）。
+"""Memory package exports."""
+from __future__ import annotations
 
-主方案只承载 ``working``（单 run 内的 scratchpad / pinned-preview /
-sanitize 处理），跨任务的更高级记忆（dataset-knowledge / tool-playbook /
-corpus 等）已抽到独立提案 ``MEMORY_MODULE_PROPOSAL.md``，这里有意不再
-出现，避免 parity 测试受其影响。
-"""
-from data_agent_langchain.memory.working import (
-    build_scratchpad_messages,
-    render_step_messages,
-    select_steps_for_context,
-    truncate_observation,
+from importlib import import_module
+
+from data_agent_langchain.memory.base import (
+    MemoryRecord,
+    MemoryStore,
+    MemoryWriter,
+    RecordKind,
+    Retriever,
+    RetrievalResult,
 )
+from data_agent_langchain.memory.factory import (
+    build_retriever,
+    build_store,
+    build_writer,
+)
+from data_agent_langchain.memory.records import (
+    DatasetKnowledgeRecord,
+    ToolPlaybookRecord,
+)
+from data_agent_langchain.memory.types import MemoryHit
+
+_WORKING_EXPORTS = {
+    "build_scratchpad_messages",
+    "render_step_messages",
+    "select_steps_for_context",
+    "truncate_observation",
+}
+
+
+def __getattr__(name: str):
+    if name in _WORKING_EXPORTS:
+        value = getattr(import_module("data_agent_langchain.memory.working"), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
+    "DatasetKnowledgeRecord",
+    "MemoryHit",
+    "MemoryRecord",
+    "MemoryStore",
+    "MemoryWriter",
+    "RecordKind",
+    "Retriever",
+    "RetrievalResult",
+    "ToolPlaybookRecord",
+    "build_retriever",
     "build_scratchpad_messages",
+    "build_store",
+    "build_writer",
     "render_step_messages",
     "select_steps_for_context",
     "truncate_observation",

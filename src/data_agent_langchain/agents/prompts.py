@@ -25,6 +25,7 @@ from data_agent_langchain.agents.prompt_strings import (
 )
 from data_agent_langchain.agents.runtime import StepRecord
 from data_agent_langchain.benchmark.schema import PublicTask
+from data_agent_langchain.memory.types import MemoryHit
 from data_agent_langchain.memory.working import build_scratchpad_messages
 from data_agent_langchain.tools.descriptions import render_legacy_prompt_block
 
@@ -223,6 +224,20 @@ def build_planning_messages(
 
 # 历史 re-export：保留这些常量名以兼容现有 ``from agents.prompts import REACT_SYSTEM_PROMPT``
 # 风格的调用点；新代码请直接 ``from agents.prompt_strings import ...``。
+def render_dataset_facts(hits: list[MemoryHit]) -> str:
+    """Render MemoryHit summaries into a whitelisted prompt fragment.
+
+    Only the ``summary`` field is used so unauthorized payload fields cannot enter
+    the prompt through this path.
+    """
+    if not hits:
+        return ""
+    lines = ["## Dataset facts (from prior runs, informational only)"]
+    for hit in hits:
+        lines.append(f"- {hit.summary}")
+    return "\n".join(lines)
+
+
 __all__ = [
     "EXECUTION_INSTRUCTION",
     "PLAN_AND_SOLVE_SYSTEM_PROMPT",
@@ -233,4 +248,5 @@ __all__ = [
     "build_plan_solve_execution_messages",
     "build_react_messages",
     "build_task_prompt",
+    "render_dataset_facts",
 ]

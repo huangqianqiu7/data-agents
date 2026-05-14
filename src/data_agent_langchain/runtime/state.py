@@ -34,6 +34,7 @@ from typing import Annotated, Any, Literal, TypedDict
 # ``steps`` 的 reducer 注解，缺名字会抛 ``NameError``。
 from data_agent_langchain.agents.runtime import StepRecord
 from data_agent_langchain.benchmark.schema import AnswerTable
+from data_agent_langchain.memory.types import MemoryHit
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +92,10 @@ class RunState(TypedDict, total=False):
     # 用 ``operator.add`` 把并发 update 拼接而不是覆盖（C1）。
     # 多节点 fake graph 测试会验证此行为。
     steps: Annotated[list[StepRecord], operator.add]
+
+    # ----- 轻量 memory 命中结果 -----
+    # 只保存可 pickle 的 MemoryHit；store / retriever / writer 等运行时对象在 state 外重建。
+    memory_hits: Annotated[list[MemoryHit], operator.add]
 
     # ----- 终止信号 -----
     answer: AnswerTable | None

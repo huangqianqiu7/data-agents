@@ -10,6 +10,7 @@ from data_agent_langchain.config import (
     DatasetConfig,
     EvaluationConfig,
     ObservabilityConfig,
+    PROJECT_ROOT,
     RunConfig,
     ToolsConfig,
     load_app_config,
@@ -67,6 +68,22 @@ evaluation:
     assert cfg.agent.backend == "langgraph"
     assert cfg.run.run_id == "demo"
     assert cfg.observability.gateway_caps_path.name == "gateway_caps.yaml"
+
+
+def test_load_app_config_from_yaml_resolves_memory_path(tmp_path: Path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+memory:
+  path: artifacts/memory
+""".strip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_app_config(config_path)
+
+    assert cfg.memory.path == PROJECT_ROOT / "artifacts" / "memory"
+    assert cfg.memory.path.is_absolute()
 
 
 def test_validate_eval_config_rejects_reproducible_without_seed():
