@@ -38,6 +38,7 @@ from data_agent_langchain.agents.react_graph import build_react_graph
 from data_agent_langchain.config import AppConfig
 from data_agent_langchain.exceptions import ConfigError
 from data_agent_langchain.llm.factory import bind_tools_for_gateway
+from data_agent_langchain.observability.events import dispatch_observability_event
 from data_agent_langchain.observability.gateway_caps import GatewayCaps
 from data_agent_langchain.observability.metrics import MetricsCollector
 from data_agent_langchain.observability.reporter import aggregate_metrics
@@ -280,7 +281,18 @@ def _build_and_set_corpus_handles(config: AppConfig, task: Any) -> None:
             build_embedder,
             build_task_corpus,
         )
-    except Exception:
+    except Exception as exc:
+        # Bug 2 修复：factory 链上的重依赖（chromadb / sentence-transformers /
+        # rag 子包）import 失败时也必须落 trace，不再静默吞掉。
+        dispatch_observability_event(
+            "memory_rag_skipped",
+            {
+                "reason": "factory_import_failed",
+                "task_id": str(task.task_id),
+                "error": f"{type(exc).__name__}: {exc}",
+            },
+            config=None,
+        )
         return
 
     try:
@@ -293,8 +305,20 @@ def _build_and_set_corpus_handles(config: AppConfig, task: Any) -> None:
             task_input_dir=task.context_dir,
             embedder=embedder,
         )
-    except Exception:
-        # 任何 corpus 构建失败 → fail-closed。事件 dispatch 由 factory 内部完成。
+    except Exception as exc:
+        # Bug 2 修复：兜底任何意外异常都落 trace。具体的 reason（如
+        # embedder_load_failed / chroma_store_load_failed）由 factory 内部
+        # dispatch；走到这里说明 factory 自己的 try/except 漏了某条路径，
+        # 归类为 ``unexpected_error`` 兜底。
+        dispatch_observability_event(
+            "memory_rag_skipped",
+            {
+                "reason": "unexpected_error",
+                "task_id": str(task.task_id),
+                "error": f"{type(exc).__name__}: {exc}",
+            },
+            config=None,
+        )
         return
 
     if handles is not None:
