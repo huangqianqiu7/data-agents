@@ -86,6 +86,41 @@ def test_planner_node_adds_dataset_memory_hits_when_enabled(
     assert output["memory_hits"][0].record_id == "dk:ds:a.csv"
 
 
+def test_planner_node_adds_dataset_memory_hits_when_plan_generation_falls_back(
+    tmp_path: Path, monkeypatch
+):
+    memory_cfg = MemoryConfig(mode="read_only_dataset", path=tmp_path)
+    store = build_store(memory_cfg)
+    store.put(
+        MemoryRecord(
+            id="dk:ds:fallback.csv",
+            namespace="dataset:ds",
+            kind="dataset_knowledge",
+            payload={
+                "file_path": "fallback.csv",
+                "file_kind": "csv",
+                "schema": {"value": "int"},
+                "row_count_estimate": 3,
+            },
+            created_at=datetime(2026, 1, 1),
+        )
+    )
+    app_config = replace(default_app_config(), memory=memory_cfg)
+    monkeypatch.setattr(planner_module, "_safe_get_app_config", lambda: app_config)
+
+    output = planner_module.planner_node(
+        _base_state(_make_task(tmp_path / "ds")),
+        config={"configurable": {"llm": FakeListChatModel(responses=["not json"])}},
+    )
+
+    assert output["plan"] == planner_module.FALLBACK_PLAN
+    [step] = output["steps"]
+    assert step.action == "__plan_generation__"
+    assert step.ok is False
+    assert step.observation == {"ok": False, "plan": planner_module.FALLBACK_PLAN}
+    assert output["memory_hits"][0].record_id == "dk:ds:fallback.csv"
+
+
 def test_planner_node_omits_memory_hits_when_memory_disabled(
     tmp_path: Path, monkeypatch
 ):
