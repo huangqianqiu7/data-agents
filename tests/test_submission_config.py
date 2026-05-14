@@ -219,6 +219,7 @@ def test_submission_appconfig_equals_default_except_paths_and_identity(monkeypat
             cfg.observability,
             gateway_caps_path=baseline.observability.gateway_caps_path,
         ),
+        memory=replace(cfg.memory, mode=baseline.memory.mode),
     )
 
     assert normalized == baseline

@@ -44,6 +44,7 @@ from data_agent_langchain.config import (
     AgentConfig,
     AppConfig,
     DatasetConfig,
+    MemoryConfig,
     ObservabilityConfig,
     RunConfig,
 )
@@ -158,6 +159,7 @@ def build_submission_config() -> AppConfig:
         observability=ObservabilityConfig(
             gateway_caps_path=DEFAULT_GATEWAY_CAPS_PATH,
         ),
+        memory=MemoryConfig(mode="read_only_dataset"),
     )
 
 
