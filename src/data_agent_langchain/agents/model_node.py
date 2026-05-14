@@ -35,7 +35,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.runnables import Runnable
 
 from data_agent_langchain.agents.model_retry import (
@@ -46,6 +46,7 @@ from data_agent_langchain.agents.model_retry import (
 from data_agent_langchain.agents.prompts import (
     build_plan_solve_execution_messages,
     build_react_messages,
+    render_dataset_facts,
 )
 from data_agent_langchain.agents.runtime import StepRecord
 from data_agent_langchain.config import AppConfig, default_app_config
@@ -143,7 +144,7 @@ def _build_messages_for_state(state: RunState, app_config: AppConfig) -> list[Ba
     if mode == "plan_solve":
         plan = list(state.get("plan") or [])
         plan_index = int(state.get("plan_index", 0) or 0)
-        return build_plan_solve_execution_messages(
+        messages = build_plan_solve_execution_messages(
             task,
             steps,
             plan=plan,
@@ -152,14 +153,20 @@ def _build_messages_for_state(state: RunState, app_config: AppConfig) -> list[Ba
             max_obs_chars=max_obs_chars,
             max_context_tokens=max_context_tokens,
         )
+    else:
+        messages = build_react_messages(
+            task,
+            steps,
+            action_mode=action_mode,
+            max_obs_chars=max_obs_chars,
+            max_context_tokens=max_context_tokens,
+        )
 
-    return build_react_messages(
-        task,
-        steps,
-        action_mode=action_mode,
-        max_obs_chars=max_obs_chars,
-        max_context_tokens=max_context_tokens,
-    )
+    hits = list(state.get("memory_hits") or [])
+    facts_text = render_dataset_facts(hits)
+    if facts_text:
+        messages = list(messages) + [HumanMessage(content=facts_text)]
+    return messages
 
 
 # ---------------------------------------------------------------------------
