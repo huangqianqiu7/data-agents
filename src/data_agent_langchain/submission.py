@@ -7,8 +7,9 @@
   2. 校验 ``/input`` 存在 + ``/output`` 可写。
   3. 主线程注册 SIGTERM handler。
   4. 清理 LangSmith 相关环境变量（防御性）。
-  5. 从 ``MODEL_*`` env 构造 ``AppConfig``，其它字段走 ``config.py`` dataclass
-     默认；固定 ``graph_mode="plan_solve"``。
+  5. 从 ``MODEL_*`` env 构造 ``AppConfig``，容器提交路径有意固定
+     ``memory.mode="read_only_dataset"``，其它字段走 ``config.py`` dataclass 默认；
+     固定 ``graph_mode="plan_solve"``。
   6. 校验 ``/app/gateway_caps.yaml`` 存在且 ``tool_calling=true``。
   7. 枚举 ``/input`` 下所有 ``task_*`` 目录。
   8. 每题先写占位 CSV ``result\\r\\n`` 到 ``/output/<task_id>/prediction.csv``。
@@ -113,7 +114,7 @@ class SubmissionConfigError(DataAgentError):
 # ---------------------------------------------------------------------------
 
 def build_submission_config() -> AppConfig:
-    """从 ``MODEL_*`` env 构造 ``AppConfig``，其它字段走 dataclass 默认，绝不读 YAML。
+    """从 ``MODEL_*`` env 构造 ``AppConfig``，绝不读 YAML。
 
     必填 env（缺失任意一个都招 :class:`SubmissionConfigError`，错误信息
     只含 env 名，不透露任何 URL / key / model 值）：
@@ -129,6 +130,9 @@ def build_submission_config() -> AppConfig:
       - ``dataset.root_path = /input``
       - ``run.output_dir = /tmp/dabench-runs``（内部目录）
       - ``observability.gateway_caps_path = /app/gateway_caps.yaml``
+
+    容器提交路径另有一个有意差异：``memory.mode = read_only_dataset``，允许
+    读取随数据集提供的记忆，但不启用 ``full`` 写入模式。
 
     其它所有字段（``max_workers`` / ``task_timeout_seconds`` /
     ``action_mode`` / ``langsmith_enabled`` / ``reproducible`` / …）均走

@@ -187,10 +187,11 @@ def test_default_task_timeout_matches_runconfig_default(monkeypatch):
 
 def test_submission_appconfig_equals_default_except_paths_and_identity(monkeypatch):
     """v4 V6（D2）：``build_submission_config()`` 与 ``default_app_config()`` 在
-    "非身份 / 非容器特化路径"字段上 dataclass 级别相等。
+    "非身份 / 非容器特化路径 / 非提交态 memory override"字段上 dataclass 级别相等。
 
-    把容器路径与 LLM 身份字段 (model / api_base / api_key) 归一化到
-    baseline 后，两个 ``AppConfig`` 必须完全相等。未来若有人偷偷在
+    把容器路径、LLM 身份字段 (model / api_base / api_key)、以及提交态有意
+    固定的 ``memory.mode=read_only_dataset`` 归一化到 baseline 后，
+    两个 ``AppConfig`` 必须完全相等。未来若有人偷偷在
     ``build_submission_config`` 引入新字段差异，本测试立即 RED。
     """
     from data_agent_langchain import submission
@@ -205,8 +206,7 @@ def test_submission_appconfig_equals_default_except_paths_and_identity(monkeypat
 
     normalized = replace(
         cfg,
-        # 容器特化路径：dataset.root_path / run.output_dir /
-        # observability.gateway_caps_path 都允许与 baseline 不同
+        # 容器特化路径和提交态 memory.mode override 允许与 baseline 不同。
         dataset=baseline.dataset,
         agent=replace(
             cfg.agent,
