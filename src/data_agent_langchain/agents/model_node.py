@@ -46,6 +46,7 @@ from data_agent_langchain.agents.model_retry import (
 from data_agent_langchain.agents.prompts import (
     build_plan_solve_execution_messages,
     build_react_messages,
+    render_corpus_snippets,
     render_dataset_facts,
 )
 from data_agent_langchain.agents.runtime import StepRecord
@@ -163,9 +164,16 @@ def _build_messages_for_state(state: RunState, app_config: AppConfig) -> list[Ba
         )
 
     hits = list(state.get("memory_hits") or [])
-    facts_text = render_dataset_facts(hits)
-    if facts_text:
-        messages = list(messages) + [HumanMessage(content=facts_text)]
+    dataset_hits = [hit for hit in hits if not hit.namespace.startswith("corpus_")]
+    corpus_hits = [hit for hit in hits if hit.namespace.startswith("corpus_")]
+    facts_text = render_dataset_facts(dataset_hits)
+    snippets_text = render_corpus_snippets(
+        corpus_hits,
+        budget_chars=app_config.memory.rag.prompt_budget_chars,
+    )
+    extra_text = "\n\n".join(text for text in (facts_text, snippets_text) if text)
+    if extra_text:
+        messages = list(messages) + [HumanMessage(content=extra_text)]
     return messages
 
 

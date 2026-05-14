@@ -238,6 +238,42 @@ def render_dataset_facts(hits: list[MemoryHit]) -> str:
     return "\n".join(lines)
 
 
+def render_corpus_snippets(hits: list[MemoryHit], *, budget_chars: int) -> str:
+    """渲染 task corpus snippets；只使用 ``summary`` 字段并严格遵守字符预算。"""
+    if not hits or budget_chars <= 0:
+        return ""
+
+    header = "## Reference snippets (from task documentation)"
+    if len(header) >= budget_chars:
+        return _truncate_prompt_fragment(header, budget_chars)
+
+    text = header
+    for hit in hits:
+        line = f"- {hit.summary}"
+        remaining = budget_chars - len(text) - 1
+        if remaining <= 0:
+            break
+        if len(line) > remaining:
+            line = _truncate_prompt_fragment(line, remaining)
+        if not line:
+            break
+        text = f"{text}\n{line}"
+        if len(text) >= budget_chars:
+            break
+    return text
+
+
+def _truncate_prompt_fragment(text: str, limit: int) -> str:
+    """截断 prompt 片段并保证返回长度不超过 ``limit``。"""
+    if limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    if limit <= 3:
+        return text[:limit]
+    return text[: limit - 3].rstrip() + "..."
+
+
 __all__ = [
     "EXECUTION_INSTRUCTION",
     "PLAN_AND_SOLVE_SYSTEM_PROMPT",
@@ -248,5 +284,6 @@ __all__ = [
     "build_plan_solve_execution_messages",
     "build_react_messages",
     "build_task_prompt",
+    "render_corpus_snippets",
     "render_dataset_facts",
 ]
