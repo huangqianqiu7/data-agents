@@ -15,11 +15,13 @@ replanner_node：
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from langchain_core.runnables import Runnable
 
 from data_agent_langchain.agents.json_parser import parse_plan
+from data_agent_langchain.agents.memory_recall import recall_dataset_facts
 from data_agent_langchain.agents.model_retry import extract_raw_response
 from data_agent_langchain.agents.prompts import build_planning_messages
 from data_agent_langchain.agents.runtime import StepRecord
@@ -43,12 +45,23 @@ def planner_node(state: RunState, config: Any | None = None) -> dict[str, Any]:
     except Exception:
         plan = list(FALLBACK_PLAN)
         plan_ok = False
-    return {
+    output = {
         "plan": plan,
         "plan_index": 0,
         "replan_used": int(state.get("replan_used", 0) or 0),
         "steps": [_planning_step(plan, ok=plan_ok)],
     }
+    app_config = _safe_get_app_config()
+    dataset_name = Path(state.get("dataset_root", "") or ".").name or "default"
+    memory_hits = recall_dataset_facts(
+        memory_cfg=app_config.memory,
+        dataset=dataset_name,
+        node="planner_node",
+        config=config,
+    )
+    if memory_hits:
+        output["memory_hits"] = memory_hits
+    return output
 
 
 def replanner_node(state: RunState, config: Any | None = None) -> dict[str, Any]:
