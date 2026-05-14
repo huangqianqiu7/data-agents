@@ -9,6 +9,9 @@ from data_agent_langchain.memory.types import MemoryHit
 from data_agent_langchain.observability.events import dispatch_observability_event
 
 
+_RECALL_ENABLED_MODES = frozenset({"read_only_dataset", "full"})
+
+
 def recall_dataset_facts(
     memory_cfg: MemoryConfig,
     dataset: str,
@@ -16,11 +19,11 @@ def recall_dataset_facts(
     config: Any | None,
 ) -> list[MemoryHit]:
     """Recall whitelisted dataset facts for a dataset namespace."""
-    if memory_cfg.mode == "disabled":
+    if memory_cfg.mode not in _RECALL_ENABLED_MODES:
         return []
 
     namespace = f"dataset:{dataset}"
-    k = memory_cfg.retrieval_max_results
+    k = max(0, int(memory_cfg.retrieval_max_results))
     store = build_store(memory_cfg)
     retriever = build_retriever(memory_cfg, store=store)
     results = retriever.retrieve("", namespace=namespace, k=k)

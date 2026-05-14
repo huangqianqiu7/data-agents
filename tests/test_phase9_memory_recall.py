@@ -64,6 +64,84 @@ def test_recall_disabled_returns_empty(monkeypatch):
     assert hits == []
 
 
+def test_recall_unknown_mode_returns_empty(monkeypatch):
+    from data_agent_langchain.agents import memory_recall
+
+    def fail_build_store(_memory_cfg):
+        raise AssertionError("unknown mode should fail closed")
+
+    monkeypatch.setattr(memory_recall, "build_store", fail_build_store)
+
+    hits = memory_recall.recall_dataset_facts(
+        MemoryConfig(mode="disable"), dataset="ds", node="planner", config=None
+    )
+
+    assert hits == []
+
+
+def test_recall_clamps_negative_k(tmp_path: Path, monkeypatch):
+    from data_agent_langchain.agents import memory_recall
+
+    events = []
+    monkeypatch.setattr(
+        memory_recall,
+        "dispatch_observability_event",
+        lambda name, data, config: events.append((name, data)),
+    )
+    cfg = MemoryConfig(
+        mode="read_only_dataset", path=tmp_path, retrieval_max_results=-1
+    )
+    store = build_store(cfg)
+    store.put(
+        MemoryRecord(
+            id="dk:ds:a.csv",
+            namespace="dataset:ds",
+            kind="dataset_knowledge",
+            payload={
+                "file_path": "a.csv",
+                "file_kind": "csv",
+                "schema": {"a": "string"},
+                "row_count_estimate": 1,
+            },
+            created_at=datetime(2026, 1, 1),
+        )
+    )
+
+    hits = memory_recall.recall_dataset_facts(
+        cfg, dataset="ds", node="planner", config=None
+    )
+
+    assert hits == []
+    assert events[0][1]["k"] == 0
+    assert events[0][1]["hit_ids"] == []
+
+
+def test_recall_summary_falls_back_to_schema_keys(tmp_path: Path):
+    from data_agent_langchain.agents.memory_recall import recall_dataset_facts
+
+    cfg = _memory_cfg(tmp_path)
+    store = build_store(cfg)
+    store.put(
+        MemoryRecord(
+            id="dk:ds:b.csv",
+            namespace="dataset:ds",
+            kind="dataset_knowledge",
+            payload={
+                "file_path": "b.csv",
+                "file_kind": "csv",
+                "schema": {"first": "string", "second": "int"},
+                "row_count_estimate": None,
+            },
+            created_at=datetime(2026, 1, 1),
+        )
+    )
+
+    [hit] = recall_dataset_facts(cfg, dataset="ds", node="planner", config=None)
+
+    assert "first, second" in hit.summary
+    assert "Rows~: ?" in hit.summary
+
+
 def test_recall_dispatches_memory_recall_event(tmp_path: Path, monkeypatch):
     from data_agent_langchain.agents import memory_recall
 
