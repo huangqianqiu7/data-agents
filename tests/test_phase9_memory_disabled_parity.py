@@ -3,12 +3,15 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 from langchain_core.language_models import FakeListChatModel
 
 import data_agent_langchain.agents.planner_node as planner_module
 from data_agent_langchain.config import MemoryConfig, default_app_config
+from data_agent_langchain.memory.base import MemoryRecord
+from data_agent_langchain.memory.factory import build_store
 
 
 def _make_task(dataset_root: Path) -> dict:
@@ -44,6 +47,21 @@ def test_planner_node_disabled_memory_mode_produces_no_memory_hits(
         default_app_config(),
         memory=MemoryConfig(mode="disabled", path=tmp_path),
     )
+    store = build_store(cfg.memory)
+    store.put(
+        MemoryRecord(
+            id="dk:ds:x.csv",
+            namespace="dataset:ds",
+            kind="dataset_knowledge",
+            payload={
+                "file_path": "x.csv",
+                "file_kind": "csv",
+                "schema": {"a": "int"},
+                "row_count_estimate": 1,
+            },
+            created_at=datetime(2026, 1, 1),
+        )
+    )
     monkeypatch.setattr(planner_module, "_safe_get_app_config", lambda: cfg)
     llm = FakeListChatModel(
         responses=['```json\n{"plan":["List files","Read data"]}\n```']
@@ -55,4 +73,4 @@ def test_planner_node_disabled_memory_mode_produces_no_memory_hits(
     )
 
     assert out["plan"] == ["List files", "Read data"]
-    assert "memory_hits" not in out or out["memory_hits"] == []
+    assert "memory_hits" not in out
