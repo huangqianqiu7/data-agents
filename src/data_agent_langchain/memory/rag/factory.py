@@ -32,7 +32,7 @@ from typing import Any
 
 from data_agent_langchain.config import CorpusRagConfig
 from data_agent_langchain.memory.rag.base import CorpusStore
-from data_agent_langchain.memory.rag.chunker import CharWindowChunker
+from data_agent_langchain.memory.rag.chunker import MarkdownAwareChunker
 from data_agent_langchain.memory.rag.documents import CorpusChunk, CorpusDocument
 from data_agent_langchain.memory.rag.embedders import (
     DeterministicStubEmbedder,
@@ -147,7 +147,7 @@ def build_task_corpus(
       3. ``Loader.scan(task_input_dir)`` → 文档列表；空列表 → 返回 ``None``
          + dispatch ``no_documents``。
       4. 对每个文档读正文 → ``Redactor.filter_text`` 过滤（命中 patterns 的整段
-         丢弃）→ ``CharWindowChunker.chunk`` 切片。
+         丢弃）→ ``MarkdownAwareChunker.chunk`` 切片。
       5. ``ChromaCorpusStore.ephemeral(namespace=f"corpus_task:{task_id}",
          embedder=embedder)``。
       6. ``store.upsert_chunks(all_chunks)``（含 embedder 调用）。
@@ -212,7 +212,7 @@ def build_task_corpus(
         return None
 
     # 步骤 4：读取 + redact + chunk。
-    chunker = CharWindowChunker(
+    chunker = MarkdownAwareChunker(
         chunk_size_chars=cfg.chunk_size_chars,
         chunk_overlap_chars=cfg.chunk_overlap_chars,
         max_chunks_per_doc=cfg.max_chunks_per_doc,

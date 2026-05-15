@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 
-_HEAVY_MODULES = ("torch", "chromadb", "sentence_transformers")
+_HEAVY_MODULES = ("torch", "chromadb", "sentence_transformers", "langchain_text_splitters")
 
 
 def _run_import_check(code: str) -> subprocess.CompletedProcess[str]:
@@ -59,6 +59,15 @@ def test_import_harrier_class_does_not_load_torch() -> None:
 from data_agent_langchain.memory.rag.embedders.sentence_transformer import HarrierEmbedder
 import sys
 assert "torch" not in sys.modules, "torch leaked at HarrierEmbedder import"
+"""
+    result = _run_import_check(code)
+    assert result.returncode == 0, result.stderr
+
+def test_import_markdown_aware_chunker_class_does_not_load_text_splitters() -> None:
+    code = """
+from data_agent_langchain.memory.rag.chunker import MarkdownAwareChunker
+import sys
+assert "langchain_text_splitters" not in sys.modules, "langchain_text_splitters leaked at MarkdownAwareChunker import"
 """
     result = _run_import_check(code)
     assert result.returncode == 0, result.stderr
