@@ -193,6 +193,69 @@ def test_runner_clears_corpus_handles_after_invoke(
     assert get_current_corpus_handles() is None
 
 
+def test_runner_clears_corpus_handles_when_setup_fails_before_invoke(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_task_with_context: tuple[str, Path],
+) -> None:
+    """RAG handles 已构建但图执行前初始化失败时，也必须清理 contextvar。
+
+    回归场景：``_build_and_set_corpus_handles`` 成功后，
+    ``_llm_for_action_mode`` / gateway caps 初始化等步骤可能在
+    ``compiled.invoke`` 之前抛错。此前清理逻辑只包住 invoke，导致同进程
+    路径下后续 task 可能读到上一 task 的 corpus handles。
+    """
+    from data_agent_langchain.runtime.context import (
+        clear_current_corpus_handles,
+        get_current_corpus_handles,
+        set_current_corpus_handles,
+    )
+
+    clear_current_corpus_handles()
+    cfg = _make_test_config(
+        task_input_dir=fake_task_with_context[1],
+        rag_enabled=True,
+        embedder_backend="stub",
+    )
+
+    # 直接复用 helper 的大部分 monkeypatch，但让 LLM 初始化在 invoke 前失败。
+    fake_task = MagicMock()
+    fake_task.task_id = fake_task_with_context[0]
+    fake_task.context_dir = cfg.dataset.root_path / fake_task.task_id / "context"
+    fake_dataset = MagicMock()
+    fake_dataset.get_task.return_value = fake_task
+
+    monkeypatch.setattr(
+        "data_agent_langchain.run.runner.DABenchPublicDataset",
+        lambda *a, **k: fake_dataset,
+    )
+    monkeypatch.setattr(
+        "data_agent_langchain.run.runner._build_and_set_corpus_handles",
+        lambda config, task: set_current_corpus_handles(object()),
+    )
+    monkeypatch.setattr(
+        "data_agent_langchain.run.runner._llm_for_action_mode",
+        MagicMock(side_effect=RuntimeError("gateway setup failed")),
+    )
+    monkeypatch.setattr(
+        "data_agent_langchain.run.runner.MetricsCollector",
+        lambda **kwargs: MagicMock(),
+    )
+
+    output_dir = cfg.run.output_dir / fake_task.task_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    from data_agent_langchain.run.runner import _run_single_task_core
+
+    with pytest.raises(RuntimeError, match="gateway setup failed"):
+        _run_single_task_core(
+            task_id=fake_task.task_id,
+            config=cfg,
+            task_output_dir=output_dir,
+        )
+
+    assert get_current_corpus_handles() is None
+
+
 def test_runner_handles_empty_context_dir_gracefully(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

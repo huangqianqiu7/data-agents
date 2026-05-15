@@ -243,28 +243,29 @@ def _run_single_task_core(
     metrics = MetricsCollector(task_id=task_id, output_dir=task_output_dir)
     register_fallback_handler(metrics.on_observability_event)
     try:
-        # v3 corpus RAG（M4.4.4）：构建 per-task corpus handles。
-        # 全部异常都被 fail-closed 吞掉：任何 RAG 失败都不应阻塞 task 主流程。
-        _build_and_set_corpus_handles(config, task)
-
-        resolved_llm = _llm_for_action_mode(task, config, llm)
-        if show_progress:
-            print(f"[dabench-lc] Loaded {task.task_id}; mode={graph_mode}; model={config.agent.model}", flush=True)
-        compiled = _build_compiled_graph(graph_mode)
-        callbacks = [metrics, *build_callbacks(config, task_id=task_id, mode=graph_mode)]
-        runnable_config: dict[str, Any] = {
-            "callbacks": callbacks,
-            "recursion_limit": _graph_recursion_limit(config, graph_mode),
-        }
-        if resolved_llm is not None:
-            runnable_config["configurable"] = {"llm": resolved_llm}
         try:
+            # v3 corpus RAG（M4.4.4）：构建 per-task corpus handles。
+            # 全部异常都被 fail-closed 吞掉：任何 RAG 失败都不应阻塞 task 主流程。
+            _build_and_set_corpus_handles(config, task)
+
+            resolved_llm = _llm_for_action_mode(task, config, llm)
+            if show_progress:
+                print(f"[dabench-lc] Loaded {task.task_id}; mode={graph_mode}; model={config.agent.model}", flush=True)
+            compiled = _build_compiled_graph(graph_mode)
+            callbacks = [metrics, *build_callbacks(config, task_id=task_id, mode=graph_mode)]
+            runnable_config: dict[str, Any] = {
+                "callbacks": callbacks,
+                "recursion_limit": _graph_recursion_limit(config, graph_mode),
+            }
+            if resolved_llm is not None:
+                runnable_config["configurable"] = {"llm": resolved_llm}
             final_state = compiled.invoke(
                 _initial_state_for_task(task, config, mode=graph_mode),
                 config=runnable_config,
             )
         finally:
-            # invoke 完成（成功 / 失败）都清理 contextvar，避免同进程下污染后续 task。
+            # 从 corpus handles 构建后到 invoke 完成之间，任何异常都要清理
+            # contextvar，避免同进程路径污染后续 task。
             clear_current_corpus_handles()
     finally:
         # Bug 5 修复：无论成功 / 异常都 unregister fallback，避免跨 task 污染
