@@ -222,7 +222,7 @@ def test_dockerfile_rag_workdir_is_app(dockerfile_text: str) -> None:
 
 
 def test_dockerfile_rag_runtime_sets_huggingface_offline_envs(dockerfile_text: str) -> None:
-    """runtime ?????? HuggingFace / transformers ????????????"""
+    """Runtime must force HuggingFace / transformers offline mode."""
     assert re.search(r"\bHF_HUB_OFFLINE\s*=\s*1\b", dockerfile_text), (
         "Dockerfile.rag runtime must set HF_HUB_OFFLINE=1 so huggingface_hub "
         "does not issue HEAD requests during evaluation"
@@ -234,7 +234,7 @@ def test_dockerfile_rag_runtime_sets_huggingface_offline_envs(dockerfile_text: s
 
 
 def test_dockerfile_rag_copies_prebaked_hf_cache_to_runtime(dockerfile_text: str) -> None:
-    """runtime ???? copy builder ???? HF cache?"""
+    """Runtime must copy the pre-baked HF cache from the builder stage."""
     assert re.search(
         r"COPY\s+--from=builder\s+/opt/models/hf\s+/opt/models/hf",
         dockerfile_text,
