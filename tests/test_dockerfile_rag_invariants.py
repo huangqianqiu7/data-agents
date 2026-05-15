@@ -107,6 +107,28 @@ def test_dockerfile_rag_installs_rag_extras(dockerfile_text: str) -> None:
     )
 
 
+def test_dockerfile_rag_installs_cpu_only_torch(dockerfile_text: str) -> None:
+    """2026-05-15 P1 §2 followup 实测发现：torch 默认 PyPI wheel 自带 CUDA libs
+    （cudnn 366 MB + cublas 423 MB + nccl 206 MB + nvshmem 60 MB + triton 201 MB
+    + cuda_bindings ...）≥1.5 GB，评测节点为 CPU-only 时全是死重量。
+
+    必须显式走 PyTorch 官方 CPU wheel index（``download.pytorch.org/whl/cpu``）
+    才能拿到 cpu-only 版本，整镜像回到 ~3.7 GB 预算。
+
+    防御性测试：任何让该约束消失的修改（例如直接 ``pip install torch``）会让
+    image bloat 回 5+ GB，本测试立即 fail。
+    """
+    # 接受 ``--index-url https://download.pytorch.org/whl/cpu`` 或
+    # ``--extra-index-url`` 形式，只要 ``whl/cpu`` 这个 channel 出现且与 torch
+    # 安装关联。
+    cpu_channel_pattern = r"download\.pytorch\.org/whl/cpu"
+    assert re.search(cpu_channel_pattern, dockerfile_text), (
+        "Dockerfile.rag must install torch from the CPU-only wheel index "
+        "(https://download.pytorch.org/whl/cpu); default PyPI wheel pulls in "
+        "1.5+ GB of unused CUDA libs (P1 §2 followup finding)"
+    )
+
+
 def test_dockerfile_rag_preloads_harrier_weights(dockerfile_text: str) -> None:
     """A2：build 时必须预烘 ``microsoft/harrier-oss-v1-270m`` 权重到镜像，
     评测节点离线可用。"""

@@ -53,9 +53,24 @@ COPY pyproject.toml /build/
 COPY README.md /build/
 COPY src/data_agent_langchain /build/src/data_agent_langchain
 
-# 装 RAG extras：chromadb + sentence-transformers + transformers + torch（CPU
-# wheel）+ base dependencies。安装到 builder 的 site-packages，后面阶段整体
-# copy 过去。``--no-cache-dir`` 让 pip 不留 cache（runtime 体积更小）。
+# 装 RAG extras：chromadb + sentence-transformers + transformers + torch + base
+# dependencies。安装到 builder 的 site-packages，后面阶段整体 copy 过去。
+# ``--no-cache-dir`` 让 pip 不留 cache（runtime 体积更小）。
+#
+# 2026-05-15 P1 §2 followup 实测发现：torch 默认 wheel (PyPI) 自带 CUDA libs
+#   (cudnn 366 MB + cublas 423 MB + nccl 206 MB + nvshmem 60 MB + triton 201 MB
+#   + cuda_bindings ...) 总计 ≥1.5 GB。评测节点为 CPU-only，CUDA libs 全是死
+#   重量。强制走 PyTorch 官方 CPU wheel index（``cpu`` channel），torch 体积从
+#   ~600 MB 降到 ~250 MB，去掉所有 nvidia/triton/cuda_* 子包，整镜像 ~3.7 GB
+#   预算回到 spec。
+#
+# 拆成两个独立 RUN 层（而不是 ``&&`` 串联）：避免单 invocation 内 pip 解析器
+# 共享状态污染（实测 ``&& pip install ".[rag]"`` 在 typer/shellingham 解析时
+# 报 ResolutionImpossible，独立 RUN 层后正常）。两个 RUN 也利于 BuildKit
+# 缓存命中：torch 层稳定后只重跑 ``.[rag]`` 解析。
+RUN pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch
 RUN pip install --no-cache-dir ".[rag]"
 
 # A2 决策：预烘 Harrier-OSS-v1-270m 权重到 /opt/models/hf。build 阶段一次性
