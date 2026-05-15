@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -50,6 +51,15 @@ def _apply_memory_overrides(
             ),
         )
     return cfg
+
+
+def _apply_hf_offline_defaults_for_rag(cfg: AppConfig) -> None:
+    if cfg.memory.mode not in {"read_only_dataset", "full"}:
+        return
+    if not cfg.memory.rag.enabled:
+        return
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +214,7 @@ def run_task_command(
     """对单个任务跑一次 LangGraph 后端。"""
     cfg = load_app_config(config)
     cfg = _apply_memory_overrides(cfg, memory_mode=memory_mode, memory_rag=memory_rag)
+    _apply_hf_offline_defaults_for_rag(cfg)
     _, run_output_dir = create_run_output_dir(cfg.run.output_dir, run_id=cfg.run.run_id)
     artifact = run_single_task(
         task_id=task_id,
@@ -243,6 +254,7 @@ def run_benchmark_command(
     cfg = load_app_config(config)
 
     cfg = _apply_memory_overrides(cfg, memory_mode=memory_mode, memory_rag=memory_rag)
+    _apply_hf_offline_defaults_for_rag(cfg)
 
     # 估算 task_total：仅用于进度条；load_app_config 后这里能访问 dataset_root。
     if progress:

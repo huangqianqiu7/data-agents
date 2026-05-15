@@ -160,3 +160,137 @@ def test_run_benchmark_memory_mode_flag_overrides_loaded_config(tmp_path: Path, 
 
     assert result.exit_code == 0
     assert seen["memory_mode"] == "read_only_dataset"
+
+
+def test_run_task_memory_rag_sets_hf_offline_defaults(tmp_path: Path, monkeypatch):
+    captured = {}
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
+    monkeypatch.setattr(cli_module, "load_app_config", lambda path: default_app_config())
+    monkeypatch.setattr(cli_module, "create_run_output_dir", lambda output_dir, run_id=None: ("run", tmp_path))
+
+    def fake_run_single_task(*, task_id, config, run_output_dir, graph_mode, show_progress):
+        captured["hf_hub_offline"] = __import__("os").environ.get("HF_HUB_OFFLINE")
+        captured["transformers_offline"] = __import__("os").environ.get("TRANSFORMERS_OFFLINE")
+        return SimpleNamespace(trace_path=tmp_path / "trace.json")
+
+    monkeypatch.setattr(cli_module, "run_single_task", fake_run_single_task)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-task",
+            "task_1",
+            "--config",
+            str(tmp_path / "config.yaml"),
+            "--memory-mode",
+            "read_only_dataset",
+            "--memory-rag",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "hf_hub_offline": "1",
+        "transformers_offline": "1",
+    }
+
+
+def test_run_benchmark_memory_rag_preserves_explicit_hf_offline_env(tmp_path: Path, monkeypatch):
+    captured = {}
+    monkeypatch.setenv("HF_HUB_OFFLINE", "0")
+    monkeypatch.setenv("TRANSFORMERS_OFFLINE", "0")
+    monkeypatch.setattr(cli_module, "load_app_config", lambda path: default_app_config())
+
+    def fake_run_benchmark(*, config, limit, graph_mode):
+        captured["hf_hub_offline"] = __import__("os").environ.get("HF_HUB_OFFLINE")
+        captured["transformers_offline"] = __import__("os").environ.get("TRANSFORMERS_OFFLINE")
+        return tmp_path, []
+
+    monkeypatch.setattr(cli_module, "run_benchmark", fake_run_benchmark)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-benchmark",
+            "--config",
+            str(tmp_path / "config.yaml"),
+            "--memory-mode",
+            "read_only_dataset",
+            "--memory-rag",
+            "--no-progress",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "hf_hub_offline": "0",
+        "transformers_offline": "0",
+    }
+
+
+def test_run_benchmark_disabled_memory_does_not_set_hf_offline_env(tmp_path: Path, monkeypatch):
+    captured = {}
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
+    monkeypatch.setattr(cli_module, "load_app_config", lambda path: default_app_config())
+
+    def fake_run_benchmark(*, config, limit, graph_mode):
+        captured["hf_hub_offline"] = __import__("os").environ.get("HF_HUB_OFFLINE")
+        captured["transformers_offline"] = __import__("os").environ.get("TRANSFORMERS_OFFLINE")
+        return tmp_path, []
+
+    monkeypatch.setattr(cli_module, "run_benchmark", fake_run_benchmark)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-benchmark",
+            "--config",
+            str(tmp_path / "config.yaml"),
+            "--memory-mode",
+            "disabled",
+            "--memory-rag",
+            "--no-progress",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "hf_hub_offline": None,
+        "transformers_offline": None,
+    }
+
+
+def test_run_benchmark_memory_rag_sets_hf_offline_defaults(tmp_path: Path, monkeypatch):
+    captured = {}
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
+    monkeypatch.setattr(cli_module, "load_app_config", lambda path: default_app_config())
+
+    def fake_run_benchmark(*, config, limit, graph_mode):
+        captured["hf_hub_offline"] = __import__("os").environ.get("HF_HUB_OFFLINE")
+        captured["transformers_offline"] = __import__("os").environ.get("TRANSFORMERS_OFFLINE")
+        return tmp_path, []
+
+    monkeypatch.setattr(cli_module, "run_benchmark", fake_run_benchmark)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-benchmark",
+            "--config",
+            str(tmp_path / "config.yaml"),
+            "--memory-mode",
+            "read_only_dataset",
+            "--memory-rag",
+            "--no-progress",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "hf_hub_offline": "1",
+        "transformers_offline": "1",
+    }
+
