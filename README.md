@@ -131,10 +131,19 @@ model_node: 只渲染 state["memory_hits"]，不主动召回
 ```
 
 `memory/rag/` 的核心边界是：`CorpusStore` 独立于 v2 `MemoryStore`；
-`chromadb` 与 `sentence-transformers` 只在 `[project.optional-dependencies].rag`
-里；`memory.mode=disabled` 时无论 `memory.rag.enabled` 如何都强制关闭 RAG。
+`chromadb`、`sentence-transformers` 与 `langchain-text-splitters` 只在
+`[project.optional-dependencies].rag` 里；`memory.mode=disabled` 时无论
+`memory.rag.enabled` 如何都强制关闭 RAG。
 `metrics.json` 只有发生 RAG 事件时才出现 `memory_rag` 段，保持 baseline
 metrics 稳定。
+
+M4.7 后，task corpus 切片由 `MarkdownAwareChunker` 负责：markdown 文档先按
+`#` / `##` / `###` header 切成语义小节，再对超长小节用 recursive character
+splitting；每个 chunk 会注入 header breadcrumb 前缀以提升召回上下文。普通
+`.txt` 文档直接走 recursive character splitting。RAG loader 只收入 `.md` /
+`.markdown` / `.txt`，不再把 `.json` 放入 corpus 索引；结构化 JSON 数据由
+`read_json` / `execute_python` 工具读取，避免大 JSON 在 CPU embedding 路径上
+导致索引超时。
 
 ### 共享内层 T-A-O 循环（`agents/execution_subgraph.py`）
 
@@ -325,7 +334,8 @@ dabench-lc run-benchmark --config configs/local.yaml --limit 10 --no-progress
 Harrier / Chroma / chunking / redaction 的完整默认值。常用字段：
 `task_corpus=true`、`shared_corpus=false`、`embedder_backend="sentence_transformer"`、
 `embedder_model_id="microsoft/harrier-oss-v1-270m"`、`retrieval_k=4`、
-`prompt_budget_chars=1800`、`task_corpus_index_timeout_s=180.0`。
+`prompt_budget_chars=1800`、`chunk_size_chars`、`chunk_overlap_chars`、
+`max_chunks_per_doc`、`task_corpus_index_timeout_s=180.0`。
 
 子进程序列化由 `AppConfig.to_dict` / `AppConfig.from_dict` 完成（v4 E13），
 避免直接 pickle 嵌套 dataclass 时的兼容性陷阱。`load_app_config(path)` 完成
@@ -490,7 +500,7 @@ $files = Get-ChildItem -LiteralPath tests -Filter 'test_phase10_rag_*.py' | ForE
 pytest @files tests/test_phase10_observability_events_fallback.py tests/test_phase10_observability_metrics_fallback.py tests/test_dockerfile_rag_invariants.py -q
 ```
 
-该套件覆盖 rag 配置、loader/chunker/redactor、stub/Harrier embedder 边界、
+该套件覆盖 rag 配置、loader/MarkdownAwareChunker/redactor、stub/Harrier embedder 边界、
 Chroma store、vector retriever、runner contextvar 生命周期、Plan-and-Solve /
 ReAct 入口召回、prompt 注入、metrics 聚合、可选依赖打包与 RAG Dockerfile
 不变量。`@pytest.mark.slow` 的真 Harrier 权重测试默认跳过，需要 `--runslow`。
@@ -553,8 +563,9 @@ ReAct 入口召回、prompt 注入、metrics 聚合、可选依赖打包与 RAG 
 4. **回调单点注入。** LangSmith 回调与 `MetricsCollector` 仅在
    `compiled.invoke` 处挂一次，节点内部不要再挂。
 5. **RAG 重依赖延迟 import。** `memory/rag/__init__.py` 与 rag 子包顶层不应
-   eager import `torch` / `chromadb` / `sentence_transformers`；这些依赖只在
-   Harrier / Chroma 的方法体内加载。
+   eager import `torch` / `chromadb` / `sentence_transformers` /
+   `langchain_text_splitters`；这些依赖只在 Harrier / Chroma /
+   `MarkdownAwareChunker.__init__` 等真正启用 RAG 的路径内加载。
 6. **Corpus handles 必须按 task 生命周期清理。** runner 在图执行前后任一异常
    路径都要 `clear_current_corpus_handles()`，避免同进程任务串味。
 7. **`step_index` 仅由 `model_node` 递增。** 其他节点只追加 `StepRecord`，
