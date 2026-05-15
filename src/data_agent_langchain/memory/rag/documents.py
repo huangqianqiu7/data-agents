@@ -21,7 +21,7 @@ from typing import Literal
 
 # ``Literal`` 字面量类型联合：限定 ``CorpusDocument.doc_kind`` 取值，
 # 与 ``Loader`` 的 MIME / 扩展名识别逻辑一一对应。
-DocKind = Literal["markdown", "text", "doc", "json_schema_note"]
+DocKind = Literal["markdown", "text", "doc"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,8 +33,10 @@ class CorpusDocument:
             生成；用于在 chroma collection 内做去重。
         source_path: 相对于 task ``context_dir`` 的相对路径（POSIX 风格），
             用于召回结果中给 LLM 提供来源指示。
-        doc_kind: 文档类型分类，限定为 ``markdown`` / ``text`` / ``doc`` /
-            ``json_schema_note`` 四类；其他类型在 ``Loader`` 阶段被过滤掉。
+        doc_kind: 文档类型分类，限定为 ``markdown`` / ``text`` / ``doc``
+            三类；其他类型在 ``Loader`` 阶段被过滤掉。``.json`` 已从白名单
+            移除（大 JSON 数据文件导致 CPU 索引超时，且 agent 已有
+            ``read_json`` / ``execute_python`` 工具处理结构化数据）。
         bytes_size: 原始文件字节数；用于诊断与 ``Loader`` 的最大尺寸截断。
         char_count: 解码后字符数；用于 ``Chunker`` 估算切片个数。
         collection: 归属 collection 名，``"task_corpus"`` 或 ``"shared:<name>"``。

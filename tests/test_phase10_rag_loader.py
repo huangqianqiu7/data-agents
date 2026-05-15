@@ -8,8 +8,8 @@
   - 不识别的扩展名（如 ``.bin``、``.pyc``）被跳过。
   - ``source_path`` 是相对于 ``context_dir`` 的 POSIX 风格相对路径。
   - ``doc_id`` 由 ``sha1(source_path + size + mtime)[:16]`` 生成且对相同输入稳定。
-  - ``doc_kind`` 按扩展名分类：``.md`` → markdown；``.txt`` → text；
-    ``.json`` → json_schema_note。
+  - ``doc_kind`` 按扩展名分类：``.md`` → markdown；``.txt`` → text。
+    ``.json`` 已移除（大 JSON 数据文件导致 CPU 索引超时）。
   - 文档数超过 ``max_docs_per_task`` 时截断，并 dispatch
     ``memory_rag_skipped(reason="max_docs_truncated")``。
 
@@ -60,8 +60,8 @@ def context_dir(tmp_path: Path) -> Path:
           README.md            <-- 应收入
           data_schema.md       <-- 应收入
           notes.txt            <-- 应收入
-          schema.json          <-- 应收入（doc_kind=json_schema_note）
-          expected_output.json <-- redactor 拦截
+          schema.json          <-- 不识别扩展名（.json 已移除），跳过
+          expected_output.json <-- 不识别扩展名，跳过
           ground_truth_v1.csv  <-- redactor 拦截
           train_labels.parquet <-- redactor 拦截
           binary.bin           <-- 不识别扩展名，跳过
@@ -96,7 +96,6 @@ def test_loader_scan_returns_only_safe_known_kinds(
         "README.md",
         "data_schema.md",
         "notes.txt",
-        "schema.json",
     ], f"扫描结果偏离白名单：{source_paths}"
 
 
@@ -110,7 +109,7 @@ def test_loader_scan_classifies_doc_kind_by_extension(
     assert docs["README.md"].doc_kind == "markdown"
     assert docs["data_schema.md"].doc_kind == "markdown"
     assert docs["notes.txt"].doc_kind == "text"
-    assert docs["schema.json"].doc_kind == "json_schema_note"
+    assert "schema.json" not in docs, ".json 已从白名单移除"
 
 
 def test_loader_scan_skips_redactor_blocked_filenames(

@@ -239,7 +239,7 @@ class MemoryConfig:
 class CorpusDocument:
     doc_id: str                                          # sha1(source_path + size + mtime)[:16]
     source_path: str                                     # context 内相对路径
-    doc_kind: Literal["markdown", "text", "doc", "json_schema_note"]
+    doc_kind: Literal["markdown", "text", "doc"]
     bytes_size: int
     char_count: int
     collection: str                                      # "task_corpus" 或 "shared:<name>"
@@ -360,7 +360,7 @@ class Redactor:
 
 1. 扫描 task 输入目录或 shared 目录。
 2. 跳过 `is_safe_filename=False` 的文件。
-3. 解析 markdown / text / doc / json schema 注释。
+3. 解析 markdown / text / doc（``.json`` 已移除——大 JSON 数据文件导致 CPU 索引超时，agent 用 ``read_json`` / ``execute_python`` 处理更高效）。
 4. 截断超过 `max_docs_per_task` 的文件数。
 5. 返回 `list[CorpusDocument]`。
 

@@ -5,7 +5,9 @@
   - :meth:`Loader.scan` 扫描调用方指定的 ``context_dir``（务必传入
     ``task.context_dir`` 而非 ``task.task_dir``，避免误读 ``expected_output.json``）。
   - 仅收入文件名安全（``Redactor.is_safe_filename=True``）且扩展名已知
-    （``.md`` / ``.txt`` / ``.json``）的文件。
+    （``.md`` / ``.txt``）的文件。``.json`` 已移除——JSON 数据文件
+    由 ``read_json`` / ``execute_python`` 工具处理更高效，且大 JSON
+    会导致 CPU 上 RAG 索引超时。
   - 超过 ``max_docs_per_task`` 的部分被截断；同时 dispatch 一个
     ``memory_rag_skipped(reason="max_docs_truncated")`` 事件，便于 metrics 聚合。
   - 文档元数据：``doc_id = sha1(source_path|size|mtime)[:16]``，``source_path``
@@ -36,7 +38,6 @@ _EXTENSION_TO_KIND: dict[str, DocKind] = {
     ".md": "markdown",
     ".markdown": "markdown",
     ".txt": "text",
-    ".json": "json_schema_note",
 }
 
 
