@@ -99,8 +99,8 @@ def test_task_corpus_index_timeout_s_default_covers_harrier_cold_start() -> None
     实测（``microsoft/harrier-oss-v1-270m`` on CPU，task_344 / 62 chunks，
     诊断脚本耗时统计）：冷启动 upsert 耗时约 60s。default 必须留至少 2x
     buffer (>=120s) 避免 fail-closed 在 production 路径上系统性触发。
-    设计目标 default = 180.0（3x 实测，与 ``RunConfig.task_timeout_seconds=600``
-    保持 1/3 预算比）。
+    设计目标 default = 180.0（3x 实测；与 ``RunConfig.task_timeout_seconds=900``
+    保持约 1/5 预算比，2026-05-15 P1 §1 把总预算从 600 提升到 900 后比例仍合理）。
     """
     cfg = CorpusRagConfig()
     assert cfg.task_corpus_index_timeout_s >= 120.0, (

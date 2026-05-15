@@ -262,7 +262,12 @@ class RunConfig:
     output_dir: Path = field(default_factory=lambda: PROJECT_ROOT / "artifacts" / "runs")
     run_id: str | None = None
     max_workers: int = 5
-    task_timeout_seconds: int = 600
+    # 2026-05-15 P1.§1 followup: 实测 PS_on (plan_solve + RAG) 上 task_344 在
+    # 600s 边界 fail-closed（gateway 偶发慢，1/5 ≈ 20% 命中率），落入 followups
+    # `01-corpus-rag-m4-followups.md` §1 候选方案 A。bump 600 → 900 给 PS 路径
+    # 留 1.5x 余量，同时保持单 task 总预算可控（参考 gateway_caps.yaml 单 step
+    # 上限 120s × max_steps 60 / max_replans 4 ≈ 上限 480s，900s 含安全余量）。
+    task_timeout_seconds: int = 900
 
 
 @dataclass(frozen=True, slots=True)

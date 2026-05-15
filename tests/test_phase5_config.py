@@ -109,6 +109,20 @@ def test_agent_config_defaults_to_tool_calling_after_gateway_smoke():
     assert default_app_config().agent.action_mode == "tool_calling"
 
 
+def test_run_config_task_timeout_seconds_default_is_900():
+    """2026-05-15 P1 §1 followup 回归：``task_timeout_seconds`` 从 600 提升到 900。
+
+    背景：M4 corpus RAG E2E A/B 实测中，``plan_solve + RAG`` (PS_on) 在 task_344
+    上偶发命中 600s 上限（gateway_caps.yaml 单 step 120s × 5 step 即吃满预算）。
+    5-task 量化数据：1/5 ≈ 20% 触发率，落入 followups §1 候选方案 A 区间
+    （<30% but >10% → 实施 A）。
+
+    bump 到 900s 给 PS_on 慢路径留 1.5x 余量，同时与 gateway_caps.yaml 单 step
+    120s × max_steps 60 / max_replans 4 ≈ 480s 上限保持安全余量。
+    """
+    assert RunConfig().task_timeout_seconds == 900
+
+
 def test_load_app_config_can_explicitly_keep_json_action(tmp_path: Path):
     from data_agent_langchain.config import load_app_config
 

@@ -316,7 +316,7 @@ dabench-lc run-benchmark --config configs/local.yaml --limit 10 --no-progress
 | `DatasetConfig` | `root_path` | 数据集根路径；图节点只看到字符串副本 |
 | `ToolsConfig` | `python_timeout_s=30.0` / `sql_row_limit=200` | `execute_python` 沙箱超时、SQL 默认行数上限 |
 | `AgentConfig` | `model` / `api_base` / `api_key` / `temperature` / `max_steps=60` / `max_replans=4` / `max_gate_retries=4` / `action_mode="tool_calling"` / `model_timeout_s=120` / `tool_timeout_s=180` / `max_model_retries=6` / `max_obs_chars=3000` / `max_context_tokens=24000` / `seed` 等 | 主循环、超时、上下文预算、决定性 |
-| `RunConfig` | `output_dir` / `run_id` / `max_workers=5` / `task_timeout_seconds=600` | runner 与子进程参数 |
+| `RunConfig` | `output_dir` / `run_id` / `max_workers=5` / `task_timeout_seconds=900` | runner 与子进程参数（2026-05-15 P1 §1: 600→900 给 PS_on LLM gateway 慢路径留余量） |
 | `ObservabilityConfig` | `langsmith_enabled=False` / `gateway_caps_path` | LangSmith 与 caps 文件位置 |
 | `EvaluationConfig` | `reproducible=False` | `reproducible=true` 时强制 `agent.seed` 已设并禁 LangSmith（v4 E5） |
 | `MemoryConfig` | `mode="disabled"` / `store_backend="jsonl"` / `retrieval_max_results=5` / `rag=CorpusRagConfig(...)` | v2 dataset memory 与 M4 corpus RAG 开关、路径、召回参数 |
