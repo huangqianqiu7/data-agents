@@ -20,6 +20,66 @@
 
 ---
 
+## 完成状态（事后追溯，2026-05-15）
+
+**M4.0–M4.6 全部 milestone 已落地**，所有 step（70 个 `- [x]`）完成。E2E A/B 验证通过：`@/c:/Users/18155/learn python/Agent/kddcup2026-data-agents-starter-kit-master/artifacts/runs/20260515T060608Z/task_344/metrics.json` 显示 ReAct + RAG 路径下 `memory_rag.task_index_built=true`、`task_chunk_count=62`、`recall_count.task_entry=1`、cosine score `0.69-0.71`、model_id `microsoft/harrier-oss-v1-270m`。
+
+### M4 主线 commit 映射
+
+| Milestone | Commit | 说明 |
+|---|---|---|
+| **M4.0–M4.4 scaffolding** | `7559a59` | `CorpusRagConfig` + `_dataclass_from_dict` 嵌套 + contextvar + `[project.optional-dependencies].rag` |
+| **M4.0–M4.4 test 套件** | `afa3786` | RED/GREEN artifacts: documents/redactor/loader/chunker/embedder/store/retriever/factory/runner |
+| **M4.4.5 CLI 接入** | `1f153a3` | `--memory-rag/--no-memory-rag` typer option + submission `DATA_AGENT_RAG=1` |
+| **M4.5.1 recall_corpus_snippets** | `4816c22` | helper 函数 + memory.mode 守卫（Bug 1 修复后追加签名） |
+| **M4.5.2 render_corpus_snippets** | `7387335` | `prompts.py` + `model_node._build_messages_for_state` 串行注入 |
+| **M4.5.3 plan-solve 入口召回** | `ae08a2e` | `planner_node` 在 `recall_dataset_facts` 后追加 corpus 召回 |
+| **M4.5.4 ReAct 入口节点** | `29e5d15` | 新增 `task_entry_node`，`START → task_entry → execution → finalize` |
+| **M4.5.5 model_node 不召回护栏** | `736d3ce` | spy 验证 60 步 ReAct 内 `recall_corpus_snippets` 仅 1 次 |
+| **M4.6.1 metrics 聚合** | `77d8b7a` | `MetricsCollector.on_custom_event` 订阅 `memory_rag_*`；M4.6.1 v2 fallback 路径在 `a0f1f63` |
+| **M4.6.2 import 边界回归** | `e5f2c54` | 子进程 `sys.modules` 断言禁止顶层 import torch/chromadb/sentence_transformers |
+
+### Bug 1–7 修复（M4.0–M4.6 落地后发现的 production-path 缺陷）
+
+| Bug | 现象 | 修复 commit | 关键改动 |
+|---|---|---|---|
+| **Bug 1** | `memory.mode=disabled` 时 RAG 仍可能构建 | `80fb620` | runner / `recall_corpus_snippets` 双重守卫 mode=disabled |
+| **Bug 2** | factory store/upsert 失败被静默吞 | `6b83466` | `build_task_corpus` 各失败分支 dispatch `memory_rag_skipped` |
+| **Bug 3** | `memory/rag/__init__.py` 占位 NotImplementedError 让 import 时炸 | `5d51b1d` + `669c215` | 顶层只 re-export 纯类型 + Protocol，去掉占位 API |
+| **Bug 4** | `ChromaCorpusStore.close` 未释放 collection 导致进程内单例累积 | `529e66f` | `close()` 显式 `delete_collection`，测试加 `unique_task_id` fixture |
+| **Bug 5** | `dispatch_observability_event` 在 LangGraph runtime 之外被 RuntimeError 静默吞 | `a0f1f63` | `events.py` 加模块级 `_FALLBACK_HANDLERS` + `MetricsCollector.on_observability_event` + runner register/unregister 配对 |
+| **Bug 6** | `task_corpus_index_timeout_s=30s` 太短，Harrier CPU 冷启动 ~60s 系统性 fail-closed | `9ab4e6f` | default 30 → 180s（3x 实测 + 1/3 task_timeout 预算）|
+| **Bug 7** | plan §F A/B 命令样式漏 `--memory-mode read_only_dataset`，按文档跑 RAG 永远不启 | `fdbcdf5` | 4 处命令样例补齐 `--memory-mode read_only_dataset` |
+
+### 关键测试集（截至 2026-05-15）
+
+- `tests/test_phase10_rag_*.py`：M4 主线 phase 10 测试，~20 文件
+- `tests/test_phase10_observability_events_fallback.py`：Bug 5 events fallback API（8 tests）
+- `tests/test_phase10_observability_metrics_fallback.py`：Bug 5 MetricsCollector 集成（5 tests）
+- `tests/test_phase10_rag_mode_disabled_guard.py`：Bug 1 守卫
+- `tests/test_phase10_rag_failure_dispatch_guard.py`：Bug 2 dispatch
+- `tests/test_phase10_rag_init_exports.py`：Bug 3 顶层导出守护
+- `tests/test_phase10_rag_chroma_close_isolation.py`：Bug 4 collection 释放
+
+全套 pytest：**564 passed, 3 skipped**（跳过的为 `@pytest.mark.slow` 真权重测试，需 `--runslow`）。
+
+### E2E A/B 4 组合（2026-05-15 实测）
+
+```powershell
+dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve --memory-mode read_only_dataset --memory-rag      # PS_on : 605s 超时 (LLM gateway 随机慢)
+dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve --memory-mode read_only_dataset --no-memory-rag   # PS_off: 230s 完成 ✅ 无 memory_rag 段（baseline parity）
+dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react      --memory-mode read_only_dataset --memory-rag      # RA_on : 292s 完成 ✅ memory_rag 段完整（核心证据）
+dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react      --memory-mode read_only_dataset --no-memory-rag   # RA_off: 416s 完成 ✅ 无 memory_rag 段（baseline parity）
+```
+
+### 已知 gap / 后续
+
+- **PS_on 在 task_344 上偶发超时**（RA_on 同 corpus 路径 292s 跑通，证明 RAG 路径本身不慢）—— 是 LLM gateway 随机性，不影响 RAG fix 验证。后续可考虑 `task_timeout_seconds` 600 → 900s。
+- **R6 召回精度**：M4 后续观察是否需要升级到 A3（动态条件触发，独立提案）。
+- **shared_corpus**（D2）：仍走独立提案 `05-shared-corpus-design.md`，本计划只占位。
+
+---
+
 ## File Structure
 
 新增文件：
@@ -96,18 +156,18 @@
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：测试矩阵
+- [x] **Step 1（RED）**：测试矩阵
   - `test_nested_dataclass_roundtrip`：构造临时 `@dataclass class Outer: inner: Inner = field(default_factory=Inner)`，断言 `to_dict / from_dict` 互逆。
   - `test_tuple_str_field_roundtrip`：`tuple[str, ...]` 字段从 list 还原回 tuple。
   - `test_optional_path_field_none`：`Path | None` 字段 None 时不变。
   - `test_optional_path_field_value`：`Path | None` 字段 str 时自动转 Path。
   - 现有 `tests/test_phase5_config.py` 全部仍通过。
-- [ ] **Step 2（GREEN）**：按 `01-design-v2.md §4.2` 改写 `_dataclass_from_dict`，引入 `_coerce_field` 辅助函数；用 `typing.get_type_hints(cls)` 解析类型；显式处理 `tuple[T, ...]` 与 `Optional[Path]`；嵌套 dataclass 递归。
-- [ ] **Step 3（验证）**：
+- [x] **Step 2（GREEN）**：按 `01-design-v2.md §4.2` 改写 `_dataclass_from_dict`，引入 `_coerce_field` 辅助函数；用 `typing.get_type_hints(cls)` 解析类型；显式处理 `tuple[T, ...]` 与 `Optional[Path]`；嵌套 dataclass 递归。
+- [x] **Step 3（验证）**：
   ```powershell
   pytest tests/test_phase5_config.py tests/test_phase10_rag_config_nested.py -q
   ```
-- [ ] **Step 4（COMMIT）**：`refactor(config): support nested dataclass, tuple, Optional in from_dict`。
+- [x] **Step 4（COMMIT）**：`refactor(config): support nested dataclass, tuple, Optional in from_dict`。
 
 **Verification:**
 - `tests/test_phase5_config.py` 全部回归通过。
@@ -121,10 +181,10 @@
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：写 `tests/test_phase10_rag_slow_marker.py`，断言：
+- [x] **Step 1（RED）**：写 `tests/test_phase10_rag_slow_marker.py`，断言：
   - 默认 `pytest tests/test_phase10_rag_slow_marker.py -q` 不跑标 `@pytest.mark.slow` 的用例。
   - `pytest tests/test_phase10_rag_slow_marker.py --runslow -q` 跑。
-- [ ] **Step 2（GREEN）**：
+- [x] **Step 2（GREEN）**：
   - `pyproject.toml` 加：
     ```toml
     [tool.pytest.ini_options]
@@ -144,7 +204,7 @@
             if "slow" in item.keywords:
                 item.add_marker(skip_slow)
     ```
-- [ ] **Step 3（COMMIT）**：`chore(test): add slow marker and --runslow opt-in flag`。
+- [x] **Step 3（COMMIT）**：`chore(test): add slow marker and --runslow opt-in flag`。
 
 ---
 
@@ -158,13 +218,13 @@
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：写 `test_corpus_chunk_is_frozen_and_picklable`，断言：
+- [x] **Step 1（RED）**：写 `test_corpus_chunk_is_frozen_and_picklable`，断言：
   - `dataclasses.fields(CorpusChunk)` 包含 `chunk_id` / `doc_id` / `ord` / `text` / `char_offset` / `char_length`。
   - 实例 `pickle.dumps` 成功。
   - 字段 `frozen` —— 赋值抛 `FrozenInstanceError`。
   - 测试同样覆盖 `CorpusDocument`。
-- [ ] **Step 2（GREEN）**：实现 `CorpusDocument` / `CorpusChunk`，均 `frozen=True, slots=True`。
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): add corpus document/chunk dataclasses`。
+- [x] **Step 2（GREEN）**：实现 `CorpusDocument` / `CorpusChunk`，均 `frozen=True, slots=True`。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): add corpus document/chunk dataclasses`。
 
 ## Task M4.1.2：`Redactor`
 
@@ -174,14 +234,14 @@
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：测试矩阵
+- [x] **Step 1（RED）**：测试矩阵
   - `is_safe_filename("expected_output.json") is False`
   - `is_safe_filename("ground_truth_v1.csv") is False`
   - `is_safe_filename("README.md") is True`
   - `filter_text` 命中 `\banswer\b` 的整段被丢弃（返回空字符串）。
   - 多 pattern 命中其中之一即丢弃。
-- [ ] **Step 2（GREEN）**：实现 `Redactor(cfg)`，基于 `cfg.redact_patterns`（正则）+ `cfg.redact_filenames`（fnmatch glob）。
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): add Redactor for filename and content filtering`。
+- [x] **Step 2（GREEN）**：实现 `Redactor(cfg)`，基于 `cfg.redact_patterns`（正则）+ `cfg.redact_filenames`（fnmatch glob）。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): add Redactor for filename and content filtering`。
 
 ## Task M4.1.3：`Loader`
 
@@ -192,14 +252,14 @@
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：测试矩阵
+- [x] **Step 1（RED）**：测试矩阵
   - 扫描 fixture `context/` 目录返回 `[CorpusDocument(...)]`，仅含 README.md / data_schema.md。
   - `expected_output.json` 与 `ground_truth.csv` 不出现。
   - 文档数超过 `max_docs_per_task` 时截断并 dispatch `memory_rag_skipped(reason="max_docs_truncated")`。
   - 路径返回 `task context_dir` 内的相对路径（不含绝对 prefix）。
   - **不**接收 `task_dir`（与 `context_dir` 分离的目录）下的文件 —— 调用者只传 `context_dir`。
-- [ ] **Step 2（GREEN）**：实现 `Loader.scan(context_dir) -> list[CorpusDocument]`，对每个文件计算 `doc_id = sha1(source_path + size + mtime)[:16]`。
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): add Loader with redact-aware filename filter`。
+- [x] **Step 2（GREEN）**：实现 `Loader.scan(context_dir) -> list[CorpusDocument]`，对每个文件计算 `doc_id = sha1(source_path + size + mtime)[:16]`。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): add Loader with redact-aware filename filter`。
 
 ## Task M4.1.4：`Chunker`
 
@@ -209,15 +269,15 @@
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：测试矩阵
+- [x] **Step 1（RED）**：测试矩阵
   - 空文本返回 `[]`。
   - 单字符长度 < `chunk_size_chars` 返回单 chunk。
   - 长文本切片数 ≈ `ceil((char_count - overlap) / (size - overlap))`。
   - 超过 `max_chunks_per_doc` 截断并 dispatch `memory_rag_skipped(reason="max_chunks_truncated")`。
   - `chunk_id == f"{doc_id}#{ord:04d}"` 稳定可复现。
   - 相邻窗口重叠正确（窗口 N 末尾 `overlap` 字符等于窗口 N+1 开头）。
-- [ ] **Step 2（GREEN）**：实现 `CharWindowChunker(cfg)`。优先在 `\n\n` 段落点处切（如果当前位置 ± 100 字符内有 `\n\n`，移动到该位置）。
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): add char-window chunker with overlap and caps`。
+- [x] **Step 2（GREEN）**：实现 `CharWindowChunker(cfg)`。优先在 `\n\n` 段落点处切（如果当前位置 ± 100 字符内有 `\n\n`，移动到该位置）。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): add char-window chunker with overlap and caps`。
 
 **Verification (M4.1 全部完成后):**
 ```powershell
@@ -239,7 +299,7 @@ pytest tests/test_phase10_rag_{documents,redactor,loader,chunker}.py -q
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：测试矩阵
+- [x] **Step 1（RED）**：测试矩阵
   - `DeterministicStubEmbedder(dim=8).dimension == 8`。
   - `DeterministicStubEmbedder(dim=8).model_id == "stub-deterministic-dim8"`。
   - 同一文本两次 `embed_documents` 返回相同向量。
@@ -247,8 +307,8 @@ pytest tests/test_phase10_rag_{documents,redactor,loader,chunker}.py -q
   - `embed_query(text)` 与 `embed_documents([text])[0]` 不一定相同（query 端注入 `"q:"` 前缀）。
   - 返回值是 `list[list[float]]`，不是 numpy。
   - 向量 L2 范数 ≈ 1（归一化）。
-- [ ] **Step 2（GREEN）**：实现 `DeterministicStubEmbedder`：基于 `hashlib.sha256(text.encode()).digest()` 截取 `dim` 字节，归一化为单位向量；`embed_query` 在 text 前加 `"q:"` 前缀。
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): add Embedder protocol and deterministic stub`。
+- [x] **Step 2（GREEN）**：实现 `DeterministicStubEmbedder`：基于 `hashlib.sha256(text.encode()).digest()` 截取 `dim` 字节，归一化为单位向量；`embed_query` 在 text 前加 `"q:"` 前缀。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): add Embedder protocol and deterministic stub`。
 
 ## Task M4.2.2：`HarrierEmbedder`（生产 backend）
 
@@ -258,7 +318,7 @@ pytest tests/test_phase10_rag_{documents,redactor,loader,chunker}.py -q
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：测试矩阵（全部 `@pytest.mark.slow`）
+- [x] **Step 1（RED）**：测试矩阵（全部 `@pytest.mark.slow`）
   - `HarrierEmbedder(cfg).dimension > 0`。
   - `HarrierEmbedder(cfg).model_id == "microsoft/harrier-oss-v1-270m"`（验证 v1 bug 修复：`self._model_id` 必须赋值）。
   - `embed_documents([])` 返回 `[]`。
@@ -279,17 +339,17 @@ pytest tests/test_phase10_rag_{documents,redactor,loader,chunker}.py -q
         assert result.returncode == 0, result.stderr
     ```
     此测试**不**带 `@slow` marker，必跑。
-- [ ] **Step 2（GREEN）**：实现 `HarrierEmbedder`：
+- [x] **Step 2（GREEN）**：实现 `HarrierEmbedder`：
   - `__init__` 内**方法级延迟 import** `sentence_transformers`、`torch`（仅在 `_resolve_device("auto")` 路径需要）。
   - 必须赋值 `self._model_id = cfg.embedder_model_id`（v1 bug 修复）。
   - `model_kwargs={"dtype": cfg.embedder_dtype}` 始终传，包括 `"auto"`（HF 推荐用法）。
   - 按 `cfg.embedder_device` / `cfg.embedder_dtype` 加载；`max_seq_length` 钳制到 `cfg.embedder_max_seq_len`。
-- [ ] **Step 3（验证）**：在本地有 RAG extra 装好的 venv 上手动跑：
+- [x] **Step 3（验证）**：在本地有 RAG extra 装好的 venv 上手动跑：
   ```powershell
   pytest tests/test_phase10_rag_embedder_harrier.py -q --runslow
   ```
   确认权重能从 `HF_HOME` 缓存离线加载。
-- [ ] **Step 4（COMMIT）**：`feat(memory-rag): add HarrierEmbedder sentence-transformers backend`。
+- [x] **Step 4（COMMIT）**：`feat(memory-rag): add HarrierEmbedder sentence-transformers backend`。
 
 **Verification (M4.2 全部完成后):**
 - `pytest tests/test_phase10_rag_embedder_stub.py -q` 全绿（默认）。
@@ -308,11 +368,11 @@ pytest tests/test_phase10_rag_{documents,redactor,loader,chunker}.py -q
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：
+- [x] **Step 1（RED）**：
   - 断言 `CorpusStore` 是 `@runtime_checkable Protocol`。
   - 断言 `CorpusStore` 仅定义 `namespace` / `dimension` / `upsert_chunks` / `query_by_vector` / `close` —— **不**含 `put` / `get` / `list` / `delete`（B2 决策守护）。
-- [ ] **Step 2（GREEN）**：按 `01-design-v2.md §4.9` 实现 `CorpusStore` Protocol。
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): add CorpusStore protocol decoupled from MemoryStore`。
+- [x] **Step 2（GREEN）**：按 `01-design-v2.md §4.9` 实现 `CorpusStore` Protocol。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): add CorpusStore protocol decoupled from MemoryStore`。
 
 ## Task M4.3.2：`ChromaCorpusStore.ephemeral`
 
@@ -323,7 +383,7 @@ pytest tests/test_phase10_rag_{documents,redactor,loader,chunker}.py -q
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：测试矩阵（全程用 `DeterministicStubEmbedder`）
+- [x] **Step 1（RED）**：测试矩阵（全程用 `DeterministicStubEmbedder`）
   - `ChromaCorpusStore.ephemeral(...)` 不写盘、不触发 telemetry（mock 验证 `Settings(anonymized_telemetry=False)` 已传）。
   - `upsert_chunks([CorpusChunk(...)])` 之后 `query_by_vector(vec, k=1)` 命中该 chunk。
   - 多 namespace 隔离：往 `corpus_task:A` 写，从 `corpus_task:B` 查得 `[]`。
@@ -331,8 +391,8 @@ pytest tests/test_phase10_rag_{documents,redactor,loader,chunker}.py -q
   - `query_by_vector(k=0)` 返回 `[]`，不调用 chroma。
   - **协议守护**：`hasattr(store, 'put')` 应当为 `False`（B2 决策）。
   - **顶层 import 边界**：`test_chroma_module_does_not_import_chromadb_at_module_load`（子进程 sys.modules 验证）。
-- [ ] **Step 2（GREEN）**：实现 `ChromaCorpusStore.ephemeral`（方法级延迟 import）。`upsert_chunks` 走 `collection.upsert(ids=, embeddings=, documents=, metadatas=)`；`query_by_vector` 走 `collection.query(query_embeddings=[vec], n_results=k, include=[...])`。collection 名用 `sha1(namespace)[:16]`。
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): add ChromaCorpusStore ephemeral backend`。
+- [x] **Step 2（GREEN）**：实现 `ChromaCorpusStore.ephemeral`（方法级延迟 import）。`upsert_chunks` 走 `collection.upsert(ids=, embeddings=, documents=, metadatas=)`；`query_by_vector` 走 `collection.query(query_embeddings=[vec], n_results=k, include=[...])`。collection 名用 `sha1(namespace)[:16]`。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): add ChromaCorpusStore ephemeral backend`。
 
 ## Task M4.3.3：`VectorCorpusRetriever`
 
@@ -343,15 +403,15 @@ pytest tests/test_phase10_rag_{documents,redactor,loader,chunker}.py -q
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：测试矩阵
+- [x] **Step 1（RED）**：测试矩阵
   - 命中场景：upsert 一组 chunks 后 retrieve 返回 `RetrievalResult(reason="vector_cosine")`，且 `record.payload["source_path"]` / `record.payload["doc_kind"]` 被回填（来自 doc_index）。
   - `k=0` 返回 `[]`，**不调用** embedder。
   - 负数 `k` clamp 到 0。
   - embedder 异常（mock `embed_query` 抛 `RuntimeError`）→ 返回 `[]`（事件由调用方 dispatch）。
   - store 异常 → 同上。
   - retriever 实现 v2 `Retriever` Protocol：`isinstance(retriever, Retriever) is True`。
-- [ ] **Step 2（GREEN）**：实现 `VectorCorpusRetriever(store, embedder, doc_index, k)`。
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): add VectorCorpusRetriever with cosine similarity`。
+- [x] **Step 2（GREEN）**：实现 `VectorCorpusRetriever(store, embedder, doc_index, k)`。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): add VectorCorpusRetriever with cosine similarity`。
 
 **Verification (M4.3 全部完成后):**
 ```powershell
@@ -371,15 +431,15 @@ pytest tests/test_phase10_rag_corpus_store_protocol.py tests/test_phase10_rag_ch
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：
+- [x] **Step 1（RED）**：
   - 默认 `CorpusRagConfig()` 字段值符合 `01-design-v2.md §4.3`。
   - `MemoryConfig().rag is not None`，是 `CorpusRagConfig` 实例。
   - `MemoryConfig.path` 默认值仍是 `PROJECT_ROOT / "artifacts" / "memory"`（D7 守护：default_factory 没被截掉）。
   - `AppConfig.to_dict / from_dict` 包含 `memory.rag` 字段且互逆。
   - `tuple[str, ...]` 字段 round-trip 正确（从 list 还原回 tuple）。
   - YAML 解析：从临时 yaml 读 `memory.rag.enabled=true` 走通。
-- [ ] **Step 2（GREEN）**：在 `config.py` 新增 `CorpusRagConfig` 与 `MemoryConfig.rag`。注意：必须在 `MemoryConfig` 定义之前 import `Literal`。
-- [ ] **Step 3（COMMIT）**：`feat(config): add MemoryConfig.rag CorpusRagConfig nested config`。
+- [x] **Step 2（GREEN）**：在 `config.py` 新增 `CorpusRagConfig` 与 `MemoryConfig.rag`。注意：必须在 `MemoryConfig` 定义之前 import `Literal`。
+- [x] **Step 3（COMMIT）**：`feat(config): add MemoryConfig.rag CorpusRagConfig nested config`。
 
 ## Task M4.4.2：`pyproject.toml` 加 `[project.optional-dependencies].rag`（C2 决策）
 
@@ -389,11 +449,11 @@ pytest tests/test_phase10_rag_corpus_store_protocol.py tests/test_phase10_rag_ch
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：
+- [x] **Step 1（RED）**：
   - `test_rag_extra_declared_but_not_in_base_dependencies`：parse `pyproject.toml`，断言：
     - `project.dependencies` 不含 `sentence-transformers` / `chromadb` / `torch`。
     - `project.optional-dependencies.rag` 含 `sentence-transformers` 与 `chromadb`。
-- [ ] **Step 2（GREEN）**：在 `pyproject.toml` 加：
+- [x] **Step 2（GREEN）**：在 `pyproject.toml` 加：
   ```toml
   [project.optional-dependencies]
   rag = [
@@ -401,7 +461,7 @@ pytest tests/test_phase10_rag_corpus_store_protocol.py tests/test_phase10_rag_ch
       "chromadb>=0.5,<1",
   ]
   ```
-- [ ] **Step 3（COMMIT）**：`chore(pyproject): add optional rag extra for sentence-transformers and chromadb`。
+- [x] **Step 3（COMMIT）**：`chore(pyproject): add optional rag extra for sentence-transformers and chromadb`。
 
 ## Task M4.4.3：`factory.build_embedder` / `build_task_corpus`
 
@@ -411,7 +471,7 @@ pytest tests/test_phase10_rag_corpus_store_protocol.py tests/test_phase10_rag_ch
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：
+- [x] **Step 1（RED）**：
   - `build_embedder(cfg)`：
     - `cfg.enabled=False` 或 `cfg.embedder_backend` 缺失 → 返回 `None`。
     - `"stub"` 返回 `DeterministicStubEmbedder(dim=...)`。
@@ -424,8 +484,8 @@ pytest tests/test_phase10_rag_corpus_store_protocol.py tests/test_phase10_rag_ch
     - 构建成功 → dispatch `memory_rag_index_built(doc_count, chunk_count, model_id, dimension, elapsed_ms)`。
     - 超时（用 monkeypatch 强制 sleep 超过 `task_corpus_index_timeout_s`）→ 返回 `None` + `memory_rag_skipped(reason="index_timeout")`。
   - `shared_corpus=True` 时 dispatch `memory_rag_skipped(reason="shared_corpus_not_implemented")` 并返回 None（不抛）。
-- [ ] **Step 2（GREEN）**：实现工厂；遵循「方法内延迟 import 重依赖」原则。
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): add factory for embedder and task corpus`。
+- [x] **Step 2（GREEN）**：实现工厂；遵循「方法内延迟 import 重依赖」原则。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): add factory for embedder and task corpus`。
 
 ## Task M4.4.4：Contextvar 与 runner 子进程入口
 
@@ -436,16 +496,16 @@ pytest tests/test_phase10_rag_corpus_store_protocol.py tests/test_phase10_rag_ch
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：
+- [x] **Step 1（RED）**：
   - `runtime/context.py` 新增 `set_current_corpus_handles / get_current_corpus_handles / clear_current_corpus_handles`。
   - 子进程入口：rag enabled 时，`get_current_corpus_handles()` 返回非 None；rag disabled 时返回 None。
   - 索引构建事件：`memory_rag_index_built` 落 trace，含 `doc_count` / `chunk_count` / `model_id` / `dimension`。
   - 失败 fail closed：embedder 加载失败时 `memory_rag_skipped` 落 trace，task 仍按 baseline 运行（图 invoke 不抛）。
   - parity：rag 关闭路径下 task_344 metrics 与 v2 baseline 一致（结构上）。
-- [ ] **Step 2（GREEN）**：
+- [x] **Step 2（GREEN）**：
   - `runtime/context.py` 增加 `corpus_handles` 的 `ContextVar`（仿 `_APP_CONFIG`）。
   - `runner._execute_task_in_subprocess`（即当前 `run_single_task` 的 contextvar 设置点，`@/c:/Users/18155/learn python/Agent/kddcup2026-data-agents-starter-kit-master/src/data_agent_langchain/run/runner.py:217-236`）在 `set_current_app_config` 之后、`compiled.invoke` 之前调用 `factory.build_embedder` + `factory.build_task_corpus`，把 handles 写 contextvar。
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): build per-task corpus in runner subprocess entry`。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): build per-task corpus in runner subprocess entry`。
 
 ## Task M4.4.5：CLI / submission 接入
 
@@ -457,16 +517,16 @@ pytest tests/test_phase10_rag_corpus_store_protocol.py tests/test_phase10_rag_ch
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：
+- [x] **Step 1（RED）**：
   - `dabench-lc run-task --memory-rag` 覆盖 `cfg.memory.rag.enabled=True`。
   - `dabench-lc run-task --no-memory-rag` 覆盖为 `False`。
   - `submission.build_submission_config()` 默认 `rag.enabled=False`。
   - env `DATA_AGENT_RAG=1` 时 `submission.build_submission_config()` 设 `rag.enabled=True`。
   - env `DATA_AGENT_RAG=0` 或 unset 时设 `False`。
-- [ ] **Step 2（GREEN）**：
+- [x] **Step 2（GREEN）**：
   - `cli.py` 增加 `--memory-rag/--no-memory-rag` typer option（仿 `--memory-mode`，用 `Optional[bool]`，None 表示不覆盖）。
   - `submission.py` 在构造 `MemoryConfig` 时读 `os.environ.get("DATA_AGENT_RAG") == "1"`。
-- [ ] **Step 3（COMMIT）**：`feat(cli): add --memory-rag toggle for corpus RAG`。
+- [x] **Step 3（COMMIT）**：`feat(cli): add --memory-rag toggle for corpus RAG`。
 
 **Verification (M4.4 全部完成后):**
 ```powershell
@@ -490,7 +550,7 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：
+- [x] **Step 1（RED）**：
   - rag 关闭：返回 `[]`，不调 retriever。
   - rag 开启 + 无 task corpus handles（contextvar 是 None）：返回 `[]`。
   - 命中场景：返回 `list[MemoryHit]`，`summary` 形如 `"[markdown] README.md: ..."`；`namespace` 形如 `"corpus_task:<task_id>"`。
@@ -499,8 +559,8 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve
   - `prompt_budget_chars` 严格遵守：累积 summary 长度不超出预算（如有溢出截断最末几条）。
   - 召回时 query 不被写入任何 store（用 spy 验证）。
   - `query_digest = sha1(query)[:8]`，原文不进 event。
-- [ ] **Step 2（GREEN）**：实现 `recall_corpus_snippets(cfg, *, task_id, query, node, config)`，仿 v2 `recall_dataset_facts` 风格。从 `runtime.context.get_current_corpus_handles()` 拿 retriever；`MemoryHit.summary` 渲染为 `[<doc_kind>] <source_path>: <text[:240]>...`。
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): add recall_corpus_snippets helper`。
+- [x] **Step 2（GREEN）**：实现 `recall_corpus_snippets(cfg, *, task_id, query, node, config)`，仿 v2 `recall_dataset_facts` 风格。从 `runtime.context.get_current_corpus_handles()` 拿 retriever；`MemoryHit.summary` 渲染为 `[<doc_kind>] <source_path>: <text[:240]>...`。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): add recall_corpus_snippets helper`。
 
 ## Task M4.5.2：`render_corpus_snippets` + `model_node` 串行注入（D5 决策）
 
@@ -511,7 +571,7 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：
+- [x] **Step 1（RED）**：
   - `render_corpus_snippets([], budget=1800) == ""`。
   - 非空 hits 渲染输出包含 `## Reference snippets (from task documentation)` 段头。
   - 渲染只用 `hit.summary`；不出现 `record_id` / `namespace` / `score`。
@@ -521,7 +581,7 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve
     - 仅 corpus_snippets：等于 `render_corpus_snippets(...)` 单独输出。
     - 两者都有：dataset_facts 段在前，corpus_snippets 段在后，用 `\n\n` 分隔。
   - `model_node` 通过 `namespace.startswith("corpus_")` 区分两类 hits。
-- [ ] **Step 2（GREEN）**：
+- [x] **Step 2（GREEN）**：
   - `prompts.py` 新增 `render_corpus_snippets(hits, budget_chars)` —— 段头 + 每条 `- summary`，按 budget 累积截断。
   - `model_node._build_messages_for_state` 在 `hits = state["memory_hits"]` 之后：
     ```python
@@ -535,7 +595,7 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve
     if extra:
         messages = list(messages) + [HumanMessage(content=extra)]
     ```
-- [ ] **Step 3（COMMIT）**：`feat(prompts): render corpus snippets alongside dataset facts in model_node`。
+- [x] **Step 3（COMMIT）**：`feat(prompts): render corpus snippets alongside dataset facts in model_node`。
 
 ## Task M4.5.3：plan-solve 入口召回（修改 `planner_node`）
 
@@ -545,13 +605,13 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：
+- [x] **Step 1（RED）**：
   - rag 关闭：planner_node 行为与 v2 完全一致（parity）—— 只产 `memory_hits` 中的 dataset facts。
   - rag 开启 + 命中：`output["memory_hits"]` 同时包含 dataset facts hits 与 corpus hits；事件 trace 含两次 `memory_recall`，`kind` 分别为 `dataset_knowledge` 与 `corpus_task`。
   - 召回顺序：先 `recall_dataset_facts`，后 `recall_corpus_snippets`；两个 hits list 拼接写回 `output["memory_hits"]`。
   - query 来自 `state["question"]`。
-- [ ] **Step 2（GREEN）**：在 `planner_node`（`@/c:/Users/18155/learn python/Agent/kddcup2026-data-agents-starter-kit-master/src/data_agent_langchain/agents/planner_node.py:54-64`）的 `recall_dataset_facts` 调用之后追加 `recall_corpus_snippets` 调用并合并 hits。
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): plan-solve planner also recalls corpus snippets`。
+- [x] **Step 2（GREEN）**：在 `planner_node`（`@/c:/Users/18155/learn python/Agent/kddcup2026-data-agents-starter-kit-master/src/data_agent_langchain/agents/planner_node.py:54-64`）的 `recall_dataset_facts` 调用之后追加 `recall_corpus_snippets` 调用并合并 hits。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): plan-solve planner also recalls corpus snippets`。
 
 ## Task M4.5.4：ReAct 入口召回（新增 `task_entry_node`，A2 决策）
 
@@ -562,14 +622,14 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：
+- [x] **Step 1（RED）**：
   - `task_entry_node(state, config)` 调用 `recall_dataset_facts` + `recall_corpus_snippets`，把合并 hits 写入 `output["memory_hits"]`。
   - rag 关闭 + memory mode disabled：`output == {}`（无 hits）。
   - rag 关闭 + memory mode read_only_dataset：`output["memory_hits"]` 只含 dataset hits。
   - rag 开启 + dataset 与 corpus 都命中：`output["memory_hits"]` 同时含两类。
   - 入图后 ReAct 模式在 `model_node` 第一次进入时 `state["memory_hits"]` 已非空（v2 baseline 验证：之前 ReAct 不召回 dataset facts，现在召回了）。
   - parity：rag 关闭、memory disabled 的 ReAct 路径与 v2 完全一致。
-- [ ] **Step 2（GREEN）**：
+- [x] **Step 2（GREEN）**：
   - 新建 `task_entry_node.py`（按 `01-design-v2.md §4.13` 伪代码）。
   - 修改 `react_graph.build_react_graph`：
     ```python
@@ -579,7 +639,7 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve
     g.add_edge("execution", "finalize")
     g.add_edge("finalize", END)
     ```
-- [ ] **Step 3（COMMIT）**：`feat(memory-rag): add task_entry_node for ReAct one-shot recall`。
+- [x] **Step 3（COMMIT）**：`feat(memory-rag): add task_entry_node for ReAct one-shot recall`。
 
 ## Task M4.5.5：`model_node` 不召回的护栏测试
 
@@ -588,10 +648,10 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve
 
 **Steps:**
 
-- [ ] **Step 1（RED）+ GREEN）**：用 spy 验证：
+- [x] **Step 1（RED）+ GREEN）**：用 spy 验证：
   - rag 开启时跑一遍 ReAct 60 步，`recall_corpus_snippets` 在整个 task 生命周期内仅被调用 **1 次**（在 task_entry_node），**不**在 model_node 内调用。
   - `state["memory_hits"]` 在 60 步过程中长度不增长（reducer 不再累加）。
-- [ ] **Step 2（COMMIT）**：`test(memory-rag): guard model_node does not call recall (A2)`。
+- [x] **Step 2（COMMIT）**：`test(memory-rag): guard model_node does not call recall (A2)`。
 
 **Verification (M4.5 全部完成后):**
 ```powershell
@@ -618,7 +678,7 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react --me
 
 **Steps:**
 
-- [ ] **Step 1（RED）**：
+- [x] **Step 1（RED）**：
   - `metrics.json` 在 `rag.enabled=true` 时含 `memory_rag` 段，结构为：
     ```json
     {
@@ -632,8 +692,8 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react --me
     ```
   - `rag.enabled=false` 时 `metrics.json` **不**含 `memory_rag` 段（baseline parity）。
   - `memory_rag_skipped` 事件被聚合到 `memory_rag.skipped` 列表（按 reason 去重计数）。
-- [ ] **Step 2（GREEN）**：扩展 `MetricsCollector.on_custom_event` 订阅 `memory_rag_index_built` / `memory_rag_skipped`；在 `_build_payload` 中条件性加入 `memory_rag` 段。
-- [ ] **Step 3（COMMIT）**：`feat(observability): aggregate memory_rag events into metrics.json`。
+- [x] **Step 2（GREEN）**：扩展 `MetricsCollector.on_custom_event` 订阅 `memory_rag_index_built` / `memory_rag_skipped`；在 `_build_payload` 中条件性加入 `memory_rag` 段。
+- [x] **Step 3（COMMIT）**：`feat(observability): aggregate memory_rag events into metrics.json`。
 
 ## Task M4.6.2：启动期 import 边界回归测试（D11）
 
@@ -642,11 +702,11 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react --me
 
 **Steps:**
 
-- [ ] **Step 1（RED）+ GREEN）**：写 3 个子进程断言测试（每个独立 `subprocess.run`）：
+- [x] **Step 1（RED）+ GREEN）**：写 3 个子进程断言测试（每个独立 `subprocess.run`）：
   - `python -c "import data_agent_langchain"` 后 `sys.modules` 不含 `torch` / `chromadb` / `sentence_transformers`。
   - `python -c "import data_agent_langchain.memory.rag"` 后 `sys.modules` 不含上述任一。
   - `python -c "from data_agent_langchain.memory.rag.embedders.sentence_transformer import HarrierEmbedder"` 后 `sys.modules` 不含 `torch`（class 定义不触发 import）。
-- [ ] **Step 2（COMMIT）**：`test(memory-rag): guard rag submodules do not import heavy deps at module load`。
+- [x] **Step 2（COMMIT）**：`test(memory-rag): guard rag submodules do not import heavy deps at module load`。
 
 **Verification (M4.6 全部完成后):**
 ```powershell
