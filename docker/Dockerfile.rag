@@ -1,0 +1,116 @@
+# KDD Cup 2026 DABench 评测镜像（RAG 路径）—— G.2。
+#
+# 与根目录 ``Dockerfile``（baseline，最小依赖）的关系：
+#   - Base ``Dockerfile``：评测最小提交，不带 RAG，镜像约 1-1.5 GB。
+#   - 本 ``Dockerfile.rag``：在 base 思路上叠加 ``[rag]`` extras 与预烘的
+#     ``microsoft/harrier-oss-v1-270m`` 权重，镜像约 3.7-4.0 GB；适合
+#     "提交即想 RAG" 的评测场景。
+#
+# 设计决策（详见 ``02-implementation-plan-v2.md`` 完成节 / G.2）：
+#   - A2：build 时预烘 Harrier 权重到 ``HF_HOME=/opt/models/hf``，评测节点
+#     离线可用。**build 阶段需要网络**；评测阶段不需要。
+#   - B2：multi-stage build：builder 装 dev tools + wheel cache + 下载权重；
+#     runtime 仅 copy site-packages 与权重，去掉 pip cache / build-essential
+#     等 builder 工具，估计减 200-400 MB。
+#   - C1：``ENV DATA_AGENT_RAG=1`` 默认打开 RAG（submission 默认 ``False``，
+#     env=1 显式打开 —— 与代码 default 一致）。
+#
+# 调用方式（评测主办脚本）：
+#   docker build -f docker/Dockerfile.rag -t kddcup2026-rag .
+#   docker run --rm \
+#       -e MODEL_KEY=... -e MODEL_BASE_URL=... -e MODEL_NAME=... \
+#       -v /path/to/eval/data:/data \
+#       -v /path/to/eval/logs:/logs \
+#       kddcup2026-rag
+#
+# 镜像总览（A2 + B2 + C1）：
+#   - python:3.13-slim-bookworm: ~150 MB
+#   - minimal deps (langchain-core / openai / pyyaml / ...): ~200 MB
+#   - RAG extras (chromadb 80 MB + sentence-transformers 50 MB +
+#     transformers 200 MB + torch CPU 250 MB + numpy/pandas ...): ~600 MB
+#   - Harrier-270m 权重 (fp32): ~600 MB
+#   - 应用代码 + gateway_caps: ~5 MB
+#   总计：~3.7 GB
+
+# =============================================================================
+# Stage 1: builder —— 装依赖 + 下载权重
+# =============================================================================
+FROM --platform=linux/amd64 python:3.13-slim-bookworm AS builder
+
+WORKDIR /build
+
+# 装系统级 build 依赖（torch / chromadb 的部分 wheel 在 slim 上需要 gcc）。
+# 这些只留在 builder 阶段，runtime 不带，**镜像体积不受影响**。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gcc \
+        g++ \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+# 仅 copy pip install 必需的最小上下文（避免 source 改动让上面层失效）。
+COPY pyproject.toml /build/
+COPY README.md /build/
+COPY src/data_agent_langchain /build/src/data_agent_langchain
+
+# 装 RAG extras：chromadb + sentence-transformers + transformers + torch（CPU
+# wheel）+ base dependencies。安装到 builder 的 site-packages，后面阶段整体
+# copy 过去。``--no-cache-dir`` 让 pip 不留 cache（runtime 体积更小）。
+RUN pip install --no-cache-dir ".[rag]"
+
+# A2 决策：预烘 Harrier-OSS-v1-270m 权重到 /opt/models/hf。build 阶段一次性
+# 走 huggingface_hub 下载；评测节点离线时直接走本地缓存。
+# ``HF_HOME`` 在此阶段也必须设置，否则下载到 /root/.cache/huggingface 而非
+# /opt/models/hf。
+ENV HF_HOME=/opt/models/hf \
+    TRANSFORMERS_OFFLINE=0 \
+    SENTENCE_TRANSFORMERS_HOME=/opt/models/hf/sentence_transformers
+
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('microsoft/harrier-oss-v1-270m')"
+
+# =============================================================================
+# Stage 2: runtime —— 评测节点真正跑的镜像
+# =============================================================================
+FROM --platform=linux/amd64 python:3.13-slim-bookworm
+
+WORKDIR /app
+
+# 从 builder copy site-packages（含所有依赖 + RAG extras），免去 runtime
+# 再 pip install 一次。Python 版本同为 3.13，路径完全对齐。
+COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# 从 builder copy 预烘的 Harrier 权重 + sentence-transformers 缓存。
+COPY --from=builder /opt/models/hf /opt/models/hf
+
+# 复制应用代码（与 base Dockerfile 一致的目录结构）。
+COPY pyproject.toml /app/
+COPY README.md /app/
+COPY src/data_agent_langchain /app/src/data_agent_langchain
+
+# 把 src 加到 PYTHONPATH，让 ``python -m data_agent_langchain.submission``
+# 能找到模块（builder 阶段已经 pip install，site-packages 里就有可执行
+# 入口，这里只是双保险）。
+ENV PYTHONPATH=/app/src
+
+# 提交态网关能力快照：与 base Dockerfile 完全一致。
+COPY docker/gateway_caps.yaml /app/gateway_caps.yaml
+
+# 运行时环境变量：
+#   - PYTHONUNBUFFERED/PYTHONDONTWRITEBYTECODE：与 base Dockerfile 一致
+#     （avoid stale .pyc + 让日志实时刷出）。
+#   - HF_HOME：让 sentence-transformers 走预烘缓存（评测节点无外网）。
+#   - TRANSFORMERS_OFFLINE=1：双保险，确保 transformers 不尝试 HF API。
+#   - HF_HUB_OFFLINE=1：huggingface_hub 层面的离线开关。
+#   - DATA_AGENT_RAG=1：C1 决策，默认打开 RAG（submission 读此 env）。
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HF_HOME=/opt/models/hf \
+    SENTENCE_TRANSFORMERS_HOME=/opt/models/hf/sentence_transformers \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HUB_OFFLINE=1 \
+    DATA_AGENT_RAG=1
+
+# 提交态严禁交互输入；所有配置走 MODEL_* / DATA_AGENT_* 环境变量。
+# ENTRYPOINT 必须与 base Dockerfile 一致，评测调用方不变。
+ENTRYPOINT ["python", "-m", "data_agent_langchain.submission"]
