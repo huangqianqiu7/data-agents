@@ -291,6 +291,22 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react --me
 `memory.mode=disabled` 会强制走无 RAG baseline。容器提交路径默认
 `memory.rag.enabled=false`，可通过 `DATA_AGENT_RAG=1` 显式打开。
 
+
+Local CLI note: when final config enables corpus RAG and `memory.mode` is
+`read_only_dataset` or `full`, `dabench-lc` defaults `HF_HUB_OFFLINE=1` and
+`TRANSFORMERS_OFFLINE=1` before starting worker processes. This makes
+`sentence-transformers` load `microsoft/harrier-oss-v1-270m` from the local
+HuggingFace cache instead of issuing repeated `huggingface.co` requests during
+parallel benchmark runs. If the local cache is missing, temporarily set
+`HF_ENDPOINT=https://hf-mirror.com` or unset the offline variables and run one
+single task first to warm the cache.
+
+RAG container note: `docker/Dockerfile.rag` downloads
+`microsoft/harrier-oss-v1-270m` into `/opt/models/hf` at build time and copies
+that cache into the runtime image. Runtime sets `HF_HOME=/opt/models/hf`,
+`HF_HUB_OFFLINE=1`, and `TRANSFORMERS_OFFLINE=1`, so evaluation nodes do not
+need HuggingFace network access.
+
 ### 6. 跑整套 benchmark
 
 ```bash
@@ -303,6 +319,21 @@ CI 场景下可用 `--no-progress` 关闭：
 ```bash
 dabench-lc run-benchmark --config configs/local.yaml --limit 10 --no-progress
 ```
+
+Run all tasks with M4 per-task corpus RAG and the default `rich` progress bar:
+
+```bash
+dabench-lc run-benchmark --config configs/local.yaml --graph-mode plan_solve --memory-mode read_only_dataset --memory-rag
+```
+
+Disable the progress bar:
+
+```bash
+dabench-lc run-benchmark --config configs/local.yaml --graph-mode plan_solve --memory-mode read_only_dataset --memory-rag --no-progress
+```
+
+`--graph-mode` can be `plan_solve` or `react`; `--memory-rag` only takes
+effect with `--memory-mode read_only_dataset` or `full`.
 
 输出在 `artifacts/runs/<run_id>/`：
 - 每任务：`<task_id>/trace.json` / `prediction.csv` / `metrics.json`
