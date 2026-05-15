@@ -47,7 +47,8 @@ def test_corpus_rag_config_defaults_match_design() -> None:
     assert cfg.chunk_overlap_chars == 200
     assert cfg.max_chunks_per_doc == 200
     assert cfg.max_docs_per_task == 100
-    assert cfg.task_corpus_index_timeout_s == 30.0
+    # Bug 6 修复：default 30.0 → 180.0（详见 ``CorpusRagConfig.task_corpus_index_timeout_s`` 注释）。
+    assert cfg.task_corpus_index_timeout_s == 180.0
 
     # Embedding
     assert cfg.embedder_backend == "sentence_transformer"
@@ -89,6 +90,23 @@ def test_corpus_rag_config_is_frozen() -> None:
     cfg = CorpusRagConfig()
     with pytest.raises(FrozenInstanceError):
         cfg.enabled = True  # type: ignore[misc]
+
+
+def test_task_corpus_index_timeout_s_default_covers_harrier_cold_start() -> None:
+    """Bug 6 回归：``task_corpus_index_timeout_s`` 默认值必须覆盖 Harrier CPU
+    冷启动 + 数十 chunks 编码的实测耗时。
+
+    实测（``microsoft/harrier-oss-v1-270m`` on CPU，task_344 / 62 chunks，
+    诊断脚本耗时统计）：冷启动 upsert 耗时约 60s。default 必须留至少 2x
+    buffer (>=120s) 避免 fail-closed 在 production 路径上系统性触发。
+    设计目标 default = 180.0（3x 实测，与 ``RunConfig.task_timeout_seconds=600``
+    保持 1/3 预算比）。
+    """
+    cfg = CorpusRagConfig()
+    assert cfg.task_corpus_index_timeout_s >= 120.0, (
+        f"task_corpus_index_timeout_s default {cfg.task_corpus_index_timeout_s}s "
+        f"is too short for Harrier CPU cold start (实测 ~60s, 推荐 >=120s)"
+    )
 
 
 def test_corpus_rag_config_uses_slots() -> None:

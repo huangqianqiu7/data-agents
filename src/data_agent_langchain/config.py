@@ -156,7 +156,11 @@ class CorpusRagConfig:
     chunk_overlap_chars: int = 200
     max_chunks_per_doc: int = 200
     max_docs_per_task: int = 100
-    task_corpus_index_timeout_s: float = 30.0
+    # Bug 6 修复：原 default=30.0 对 Harrier-270m CPU 冷启动 + ~60 chunks 编码
+    # 不够（实测 60s），导致 production 路径 fail-closed 系统性触发，metrics 永远
+    # 不出现 ``memory_rag`` 段。提高到 180.0（3x 实测）以 cover 200-300 chunks 常规
+    # 负载，并保持 1/3 ``RunConfig.task_timeout_seconds=600`` 的预算比例。
+    task_corpus_index_timeout_s: float = 180.0
 
     # ----- Embedding -----
     embedder_backend: Literal["sentence_transformer", "stub"] = "sentence_transformer"
