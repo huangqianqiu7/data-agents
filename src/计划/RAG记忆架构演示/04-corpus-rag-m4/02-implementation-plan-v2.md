@@ -597,12 +597,12 @@ dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve
 ```powershell
 pytest tests/test_phase10_rag_*.py tests/test_phase4_planner_node.py tests/test_phase3_model.py -q
 ```
-全绿。本地手动 A/B：
+全绿。本地手动 A/B（**Bug 7 修正**：`configs/local.yaml` 默认 `memory.mode=disabled` 时 RAG 守卫会强制关闭，必须同时显式 `--memory-mode read_only_dataset`）：
 ```powershell
-dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve --no-memory-rag
-dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve --memory-rag
-dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react --no-memory-rag
-dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react --memory-rag
+dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve --memory-mode read_only_dataset --no-memory-rag
+dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve --memory-mode read_only_dataset --memory-rag
+dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react --memory-mode read_only_dataset --no-memory-rag
+dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react --memory-mode read_only_dataset --memory-rag
 ```
 比较 metrics.json 中 `memory_rag` 字段、tool_calls 计数与 token 用量。
 
@@ -673,11 +673,12 @@ pytest tests/test_phase1_runstate.py tests/test_phase3_tool_node.py tests/test_p
 # Slow（手动 opt-in）
 pytest tests/test_phase10_rag_embedder_harrier.py -q --runslow
 
-# 本地 e2e A/B（4 个组合）
-dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve --no-memory-rag
-dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve --memory-rag
-dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react --no-memory-rag
-dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react --memory-rag
+# 本地 e2e A/B（4 个组合）。Bug 7：必须带 `--memory-mode read_only_dataset`，
+# 否则 local.yaml 默认 mode=disabled 让 RAG 守卫提前 return。
+dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve --memory-mode read_only_dataset --no-memory-rag
+dabench-lc run-task task_344 --config configs/local.yaml --graph-mode plan_solve --memory-mode read_only_dataset --memory-rag
+dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react --memory-mode read_only_dataset --no-memory-rag
+dabench-lc run-task task_344 --config configs/local.yaml --graph-mode react --memory-mode read_only_dataset --memory-rag
 ```
 
 验收标准：
