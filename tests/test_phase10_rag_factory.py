@@ -317,6 +317,100 @@ def test_build_task_corpus_index_can_retrieve_indexed_chunks(
         assert "source_path" in r.record.payload
 
 
+def test_build_task_corpus_uses_markdown_aware_chunker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unique_task_id: str,
+) -> None:
+    context_dir = tmp_path / "context"
+    context_dir.mkdir()
+    (context_dir / "README.md").write_text("# Title\n\nbody", encoding="utf-8")
+
+    import data_agent_langchain.memory.rag.factory as factory
+
+    constructed: list[dict[str, int]] = []
+    captured_chunks: list[CorpusChunk] = []
+
+    class SpyChunker:
+        def __init__(
+            self,
+            *,
+            chunk_size_chars: int,
+            chunk_overlap_chars: int,
+            max_chunks_per_doc: int,
+        ) -> None:
+            constructed.append(
+                {
+                    "chunk_size_chars": chunk_size_chars,
+                    "chunk_overlap_chars": chunk_overlap_chars,
+                    "max_chunks_per_doc": max_chunks_per_doc,
+                }
+            )
+
+        def chunk(self, doc: Any, text: str) -> list[CorpusChunk]:
+            return [
+                CorpusChunk(
+                    chunk_id=f"{doc.doc_id}#0000",
+                    doc_id=doc.doc_id,
+                    ord=0,
+                    text="> Title\n\nbody",
+                    char_offset=0,
+                    char_length=len("> Title\n\nbody"),
+                )
+            ]
+
+    class FakeStore:
+        @property
+        def namespace(self) -> str:
+            return f"corpus_task:{unique_task_id}"
+
+        @property
+        def dimension(self) -> int:
+            return 16
+
+        def upsert_chunks(self, chunks: Any) -> None:
+            captured_chunks.extend(chunks)
+
+        def query_by_vector(self, vector: Any, *, k: int) -> list[Any]:
+            return []
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(factory, "MarkdownAwareChunker", SpyChunker)
+
+    from data_agent_langchain.memory.rag.stores import chroma
+
+    monkeypatch.setattr(
+        chroma.ChromaCorpusStore,
+        "ephemeral",
+        classmethod(lambda cls, **kwargs: FakeStore()),
+    )
+
+    cfg = CorpusRagConfig(
+        enabled=True,
+        chunk_size_chars=321,
+        chunk_overlap_chars=32,
+        max_chunks_per_doc=7,
+    )
+    handles = factory.build_task_corpus(
+        cfg,
+        task_id=unique_task_id,
+        task_input_dir=context_dir,
+        embedder=DeterministicStubEmbedder(dim=16),
+    )
+
+    assert constructed == [
+        {
+            "chunk_size_chars": 321,
+            "chunk_overlap_chars": 32,
+            "max_chunks_per_doc": 7,
+        }
+    ]
+    assert captured_chunks[0].text.startswith("> Title\n\n")
+    assert handles is not None
+
+
 def test_build_task_corpus_returns_none_when_timeout(
     context_with_docs: Path,
     captured_events: list[tuple[str, dict[str, Any]]],
