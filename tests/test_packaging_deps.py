@@ -112,6 +112,19 @@ def test_json_repair_is_declared_runtime_dependency() -> None:
     )
 
 
+def test_project_readme_points_to_root_readme() -> None:
+    """The packaged README should be the maintained root README."""
+    data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    readme = data["project"].get("readme")
+    expected = "README.md"
+    assert readme == expected, (
+        f"pyproject [project].readme should point to {expected!r}; got {readme!r}."
+    )
+    assert (PROJECT_ROOT / expected).is_file(), (
+        f"pyproject [project].readme target does not exist: {expected}"
+    )
+
+
 def test_runtime_top_level_imports_are_declared() -> None:
     """全量扫描：``src/data_agent_langchain`` 顶层 import 都已声明或属于 stdlib/本地包。
 
