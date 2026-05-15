@@ -219,3 +219,27 @@ def test_dockerfile_rag_workdir_is_app(dockerfile_text: str) -> None:
     assert re.search(r"WORKDIR\s+/app\b", dockerfile_text), (
         "Dockerfile.rag must set WORKDIR /app (parity with base Dockerfile)"
     )
+
+
+def test_dockerfile_rag_runtime_sets_huggingface_offline_envs(dockerfile_text: str) -> None:
+    """runtime ?????? HuggingFace / transformers ????????????"""
+    assert re.search(r"\bHF_HUB_OFFLINE\s*=\s*1\b", dockerfile_text), (
+        "Dockerfile.rag runtime must set HF_HUB_OFFLINE=1 so huggingface_hub "
+        "does not issue HEAD requests during evaluation"
+    )
+    assert re.search(r"\bTRANSFORMERS_OFFLINE\s*=\s*1\b", dockerfile_text), (
+        "Dockerfile.rag runtime must set TRANSFORMERS_OFFLINE=1 so transformers "
+        "loads only from the pre-baked cache during evaluation"
+    )
+
+
+def test_dockerfile_rag_copies_prebaked_hf_cache_to_runtime(dockerfile_text: str) -> None:
+    """runtime ???? copy builder ???? HF cache?"""
+    assert re.search(
+        r"COPY\s+--from=builder\s+/opt/models/hf\s+/opt/models/hf",
+        dockerfile_text,
+    ), (
+        "Dockerfile.rag must copy /opt/models/hf from builder into runtime so "
+        "HF_HOME=/opt/models/hf has the preloaded Harrier cache"
+    )
+
