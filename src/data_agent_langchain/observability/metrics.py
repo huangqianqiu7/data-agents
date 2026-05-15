@@ -52,6 +52,20 @@ class MetricsCollector(BaseCallbackHandler):
         self._tool_counts[name] = self._tool_counts.get(name, 0) + 1
 
     def on_custom_event(self, name: str, data: dict, *, run_id, **kwargs) -> None:
+        """LangChain 主路径：在 LangGraph runtime 内被 callback manager 调用。"""
+        self._handle_event(name, data)
+
+    def on_observability_event(self, name: str, data: dict) -> None:
+        """Bug 5 fallback 路径：``runner._build_and_set_corpus_handles`` 在
+        ``compiled.invoke`` 之前 dispatch 的事件经 ``events.py`` fallback 路由到此。
+
+        与 :meth:`on_custom_event` 行为等价；签名上不接收 ``run_id`` / ``kwargs``，
+        因为 fallback 是 LangGraph runtime 之外，没有 ``run_id``。
+        """
+        self._handle_event(name, data)
+
+    def _handle_event(self, name: str, data: dict) -> None:
+        """``on_custom_event`` 与 ``on_observability_event`` 的共享实现。"""
         if name == "gate_block":
             self._gate_blocks += 1
         elif name == "replan_triggered":

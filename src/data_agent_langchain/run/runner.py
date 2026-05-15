@@ -38,7 +38,11 @@ from data_agent_langchain.agents.react_graph import build_react_graph
 from data_agent_langchain.config import AppConfig
 from data_agent_langchain.exceptions import ConfigError
 from data_agent_langchain.llm.factory import bind_tools_for_gateway
-from data_agent_langchain.observability.events import dispatch_observability_event
+from data_agent_langchain.observability.events import (
+    dispatch_observability_event,
+    register_fallback_handler,
+    unregister_fallback_handler,
+)
 from data_agent_langchain.observability.gateway_caps import GatewayCaps
 from data_agent_langchain.observability.metrics import MetricsCollector
 from data_agent_langchain.observability.reporter import aggregate_metrics
@@ -231,30 +235,41 @@ def _run_single_task_core(
     set_current_app_config(config)
     task = DABenchPublicDataset(config.dataset.root_path).get_task(task_id)
 
-    # v3 corpus RAG（M4.4.4）：构建 per-task corpus handles。
-    # 全部异常都被 fail-closed 吞掉：任何 RAG 失败都不应阻塞 task 主流程。
-    _build_and_set_corpus_handles(config, task)
-
-    resolved_llm = _llm_for_action_mode(task, config, llm)
-    if show_progress:
-        print(f"[dabench-lc] Loaded {task.task_id}; mode={graph_mode}; model={config.agent.model}", flush=True)
-    compiled = _build_compiled_graph(graph_mode)
+    # Bug 5 修复：``MetricsCollector`` 提前到 ``_build_and_set_corpus_handles``
+    # 之前构造，并 register 到 events fallback。这样 corpus 构建阶段
+    # （在 LangGraph runtime 之外，``dispatch_custom_event`` 抛 ``RuntimeError``）
+    # dispatch 的 ``memory_rag_index_built`` / ``memory_rag_skipped`` 事件
+    # 能经 fallback 路径送达 metrics，最终汇入 ``metrics.json.memory_rag``。
     metrics = MetricsCollector(task_id=task_id, output_dir=task_output_dir)
-    callbacks = [metrics, *build_callbacks(config, task_id=task_id, mode=graph_mode)]
-    runnable_config: dict[str, Any] = {
-        "callbacks": callbacks,
-        "recursion_limit": _graph_recursion_limit(config, graph_mode),
-    }
-    if resolved_llm is not None:
-        runnable_config["configurable"] = {"llm": resolved_llm}
+    register_fallback_handler(metrics.on_observability_event)
     try:
-        final_state = compiled.invoke(
-            _initial_state_for_task(task, config, mode=graph_mode),
-            config=runnable_config,
-        )
+        # v3 corpus RAG（M4.4.4）：构建 per-task corpus handles。
+        # 全部异常都被 fail-closed 吞掉：任何 RAG 失败都不应阻塞 task 主流程。
+        _build_and_set_corpus_handles(config, task)
+
+        resolved_llm = _llm_for_action_mode(task, config, llm)
+        if show_progress:
+            print(f"[dabench-lc] Loaded {task.task_id}; mode={graph_mode}; model={config.agent.model}", flush=True)
+        compiled = _build_compiled_graph(graph_mode)
+        callbacks = [metrics, *build_callbacks(config, task_id=task_id, mode=graph_mode)]
+        runnable_config: dict[str, Any] = {
+            "callbacks": callbacks,
+            "recursion_limit": _graph_recursion_limit(config, graph_mode),
+        }
+        if resolved_llm is not None:
+            runnable_config["configurable"] = {"llm": resolved_llm}
+        try:
+            final_state = compiled.invoke(
+                _initial_state_for_task(task, config, mode=graph_mode),
+                config=runnable_config,
+            )
+        finally:
+            # invoke 完成（成功 / 失败）都清理 contextvar，避免同进程下污染后续 task。
+            clear_current_corpus_handles()
     finally:
-        # invoke 完成（成功 / 失败）都清理 contextvar，避免同进程下污染后续 task。
-        clear_current_corpus_handles()
+        # Bug 5 修复：无论成功 / 异常都 unregister fallback，避免跨 task 污染
+        # （``run_benchmark`` 单进程并发时 register 列表是全局的）。
+        unregister_fallback_handler(metrics.on_observability_event)
     return build_run_result(task_id, final_state).to_dict()
 
 
