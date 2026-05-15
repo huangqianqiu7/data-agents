@@ -174,6 +174,16 @@ def test_non_markdown_doc_kind_uses_recursive_only(doc_kind: str) -> None:
     assert all(not chunk.text.startswith("> ") for chunk in chunks)
 
 
+def test_json_schema_note_doc_kind_is_not_chunked() -> None:
+    text = "{\"schema\": " + "\"field\": \"value\", " * 100 + "}"
+
+    chunks = _chunker(chunk_size_chars=120, chunk_overlap_chars=20).chunk(
+        _make_doc(doc_kind="json_schema_note", source_path="json/Patient.json"), text
+    )
+
+    assert chunks == []
+
+
 def test_truncates_when_exceeding_max_chunks() -> None:
     chunks = _chunker(
         chunk_size_chars=50, chunk_overlap_chars=5, max_chunks_per_doc=3

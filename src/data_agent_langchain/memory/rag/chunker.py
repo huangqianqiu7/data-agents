@@ -51,11 +51,12 @@ class MarkdownAwareChunker:
         if not text or not text.strip():
             return []
 
-        raw_chunks = (
-            self._chunk_markdown(text)
-            if doc.doc_kind == "markdown"
-            else self._chunk_recursive_only(text)
-        )
+        if doc.doc_kind == "markdown":
+            raw_chunks = self._chunk_markdown(text)
+        elif doc.doc_kind in {"text", "doc"}:
+            raw_chunks = self._chunk_recursive_only(text)
+        else:
+            return []
         truncated = len(raw_chunks) > self._max_chunks
         if truncated:
             raw_chunks = raw_chunks[: self._max_chunks]
