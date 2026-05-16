@@ -93,7 +93,13 @@ def test_model_node_appends_dataset_facts_then_corpus_snippets(tmp_path: Path) -
         _corpus_hit(),
     ]
 
-    messages = _build_messages_for_state(state, default_app_config())
+    base = default_app_config()
+    app_config = replace(
+        base,
+        memory=replace(base.memory, inject_dataset_facts=True),
+    )
+
+    messages = _build_messages_for_state(state, app_config)
 
     assert isinstance(messages[-1], HumanMessage)
     content = str(messages[-1].content)
