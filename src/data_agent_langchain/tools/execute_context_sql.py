@@ -7,6 +7,7 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from data_agent_langchain.benchmark.schema import PublicTask
+from data_agent_langchain.exceptions import ContextAssetNotFoundError
 from data_agent_langchain.tools.filesystem import resolve_context_path
 from data_agent_langchain.tools.sqlite import execute_read_only_sql
 from data_agent_langchain.tools.descriptions import render_legacy_description
@@ -51,6 +52,12 @@ class ExecuteContextSqlTool(BaseTool):
         try:
             resolved = resolve_context_path(self._task, path)
             result = execute_read_only_sql(resolved, sql, limit=effective_limit)
+        except ContextAssetNotFoundError as exc:
+            return ToolRuntimeResult(
+                ok=False,
+                content={"tool": self.name, "error": str(exc)},
+                error_kind="validation",
+            )
         except Exception as exc:
             return ToolRuntimeResult(
                 ok=False,

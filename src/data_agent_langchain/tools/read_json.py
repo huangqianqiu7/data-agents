@@ -7,6 +7,7 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from data_agent_langchain.benchmark.schema import PublicTask
+from data_agent_langchain.exceptions import ContextAssetNotFoundError
 from data_agent_langchain.tools.filesystem import read_json_preview
 from data_agent_langchain.tools.descriptions import render_legacy_description
 from data_agent_langchain.tools.tool_runtime import ToolRuntime, ToolRuntimeResult
@@ -38,6 +39,12 @@ class ReadJsonTool(BaseTool):
     def _run(self, path: str, max_chars: int = 4000, **_kwargs: Any) -> ToolRuntimeResult:
         try:
             preview = read_json_preview(self._task, path, max_chars=max_chars)
+        except ContextAssetNotFoundError as exc:
+            return ToolRuntimeResult(
+                ok=False,
+                content={"tool": self.name, "error": str(exc)},
+                error_kind="validation",
+            )
         except Exception as exc:
             return ToolRuntimeResult(
                 ok=False,

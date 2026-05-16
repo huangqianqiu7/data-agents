@@ -211,11 +211,11 @@ def test_tool_node_validation_error_maps_to_tool_validation(synthetic_task):
     assert update["last_error_kind"] in {"tool_error", "tool_validation"}
 
 
-def test_tool_node_runtime_error_for_missing_file(synthetic_task):
+def test_tool_node_validation_error_for_missing_file(synthetic_task):
     state = _state(synthetic_task, action="read_csv", action_input={"path": "nope.csv"})
     update = tool_node_module.tool_node(state)
     assert update["last_tool_ok"] is False
-    assert update["last_error_kind"] == "tool_error"
+    assert update["last_error_kind"] == "tool_validation"
     [step] = update["steps"]
     assert step.action == "read_csv"
     assert step.ok is False

@@ -178,12 +178,12 @@ def test_read_csv_preview_columns_and_rows(tmp_path):
     assert result.content["row_count"] == 3
 
 
-def test_read_csv_missing_file_returns_runtime_error(tmp_path):
+def test_read_csv_missing_file_returns_validation_error(tmp_path):
     task = _make_task(tmp_path)
     tool = ReadCsvTool(task=task, runtime=_runtime_for(task))
     result = tool.invoke({"path": "does_not_exist.csv"})
     assert not result.ok
-    assert result.error_kind == "runtime"
+    assert result.error_kind == "validation"
     assert "Missing context asset" in result.content["error"]
 
 
@@ -207,6 +207,24 @@ def test_read_doc_preview_shape(tmp_path):
     assert "title" in result.content["preview"]
 
 
+def test_read_json_missing_file_returns_validation_error(tmp_path):
+    task = _make_task(tmp_path)
+    tool = ReadJsonTool(task=task, runtime=_runtime_for(task))
+    result = tool.invoke({"path": "does_not_exist.json"})
+    assert not result.ok
+    assert result.error_kind == "validation"
+    assert "Missing context asset" in result.content["error"]
+
+
+def test_read_doc_missing_file_returns_validation_error(tmp_path):
+    task = _make_task(tmp_path)
+    tool = ReadDocTool(task=task, runtime=_runtime_for(task))
+    result = tool.invoke({"path": "does_not_exist.md"})
+    assert not result.ok
+    assert result.error_kind == "validation"
+    assert "Missing context asset" in result.content["error"]
+
+
 # ---------------------------------------------------------------------------
 # InspectSqliteSchemaTool / ExecuteContextSqlTool
 # ---------------------------------------------------------------------------
@@ -228,6 +246,33 @@ def test_execute_context_sql_select(tmp_path):
     )
     assert result.ok
     assert result.content["rows"] == [["Alice"], ["Bob"]]
+
+
+def test_inspect_sqlite_missing_db_returns_validation_error(tmp_path):
+    task = _make_task(tmp_path)
+    tool = InspectSqliteSchemaTool(task=task, runtime=_runtime_for(task))
+    result = tool.invoke({"path": "missing.sqlite"})
+    assert not result.ok
+    assert result.error_kind == "validation"
+    assert "Missing context asset" in result.content["error"]
+
+
+def test_execute_context_sql_missing_db_returns_validation_error(tmp_path):
+    task = _make_task(tmp_path)
+    tool = ExecuteContextSqlTool(task=task, runtime=_runtime_for(task))
+    result = tool.invoke({"path": "missing.sqlite", "sql": "SELECT 1"})
+    assert not result.ok
+    assert result.error_kind == "validation"
+    assert "Missing context asset" in result.content["error"]
+
+
+def test_execute_context_sql_schema_mismatch_remains_runtime_error(tmp_path):
+    task = _make_task(tmp_path)
+    tool = ExecuteContextSqlTool(task=task, runtime=_runtime_for(task))
+    result = tool.invoke({"path": "data.sqlite", "sql": "SELECT * FROM missing_table"})
+    assert not result.ok
+    assert result.error_kind == "runtime"
+    assert "missing_table" in result.content["error"]
 
 
 def test_execute_context_sql_rejects_writes(tmp_path):
