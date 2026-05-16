@@ -208,6 +208,7 @@ class MemoryConfig:
     )
     retriever_type: str = "exact"
     retrieval_max_results: int = 5
+    inject_dataset_facts: bool = False
     # v3 corpus RAG 嵌套子配置（``01-design-v2.md §4.3``）；M4.4.1 引入。
     rag: CorpusRagConfig = field(default_factory=CorpusRagConfig)
 

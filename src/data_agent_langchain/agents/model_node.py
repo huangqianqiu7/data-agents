@@ -166,7 +166,8 @@ def _build_messages_for_state(state: RunState, app_config: AppConfig) -> list[Ba
     hits = list(state.get("memory_hits") or [])
     dataset_hits = [hit for hit in hits if not hit.namespace.startswith("corpus_")]
     corpus_hits = [hit for hit in hits if hit.namespace.startswith("corpus_")]
-    facts_text = render_dataset_facts(dataset_hits)
+    inject_dataset_facts = bool(getattr(app_config.memory, "inject_dataset_facts", False))
+    facts_text = render_dataset_facts(dataset_hits) if inject_dataset_facts else ""
     snippets_text = render_corpus_snippets(
         corpus_hits,
         budget_chars=app_config.memory.rag.prompt_budget_chars,

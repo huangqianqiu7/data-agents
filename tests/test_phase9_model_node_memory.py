@@ -1,10 +1,11 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage
 
 from data_agent_langchain.agents.model_node import _build_messages_for_state
-from data_agent_langchain.config import default_app_config
+from data_agent_langchain.config import MemoryConfig, default_app_config
 from data_agent_langchain.memory.types import MemoryHit
 
 
@@ -40,7 +41,7 @@ def _joined_content(messages) -> str:
     return "\n".join(str(message.content) for message in messages)
 
 
-def test_build_messages_appends_dataset_facts_for_react_memory_hits(tmp_path):
+def test_build_messages_omits_dataset_facts_by_default_for_react_memory_hits(tmp_path):
     state = _task_state(tmp_path)
     state["memory_hits"] = [
         MemoryHit(
@@ -53,6 +54,27 @@ def test_build_messages_appends_dataset_facts_for_react_memory_hits(tmp_path):
 
     messages = _build_messages_for_state(state, default_app_config())
 
+    assert "Dataset facts" not in _joined_content(messages)
+    assert "a.csv" not in _joined_content(messages)
+
+
+def test_build_messages_appends_dataset_facts_when_injection_enabled(tmp_path):
+    state = _task_state(tmp_path)
+    state["memory_hits"] = [
+        MemoryHit(
+            record_id="record-a",
+            namespace="dataset:task_1",
+            score=1.0,
+            summary="File: a.csv  Kind: csv  Columns: ['a', 'b']",
+        )
+    ]
+    cfg = replace(
+        default_app_config(),
+        memory=MemoryConfig(mode="read_only_dataset", inject_dataset_facts=True),
+    )
+
+    messages = _build_messages_for_state(state, cfg)
+
     assert isinstance(messages[-1], HumanMessage)
     assert "Dataset facts" in str(messages[-1].content)
     assert "a.csv" in _joined_content(messages)
@@ -64,7 +86,7 @@ def test_build_messages_omits_dataset_facts_when_memory_hits_missing(tmp_path):
     assert "Dataset facts" not in _joined_content(messages)
 
 
-def test_build_messages_appends_dataset_facts_for_plan_solve_memory_hits(tmp_path):
+def test_build_messages_omits_dataset_facts_by_default_for_plan_solve_memory_hits(tmp_path):
     state = _task_state(tmp_path)
     state.update(
         {
@@ -84,6 +106,31 @@ def test_build_messages_appends_dataset_facts_for_plan_solve_memory_hits(tmp_pat
 
     messages = _build_messages_for_state(state, default_app_config())
 
-    assert isinstance(messages[-1], HumanMessage)
-    assert "Dataset facts" in str(messages[-1].content)
-    assert "b.csv" in _joined_content(messages)
+    assert "Dataset facts" not in _joined_content(messages)
+    assert "b.csv" not in _joined_content(messages)
+
+
+def test_build_messages_keeps_corpus_snippets_when_dataset_facts_disabled(tmp_path):
+    state = _task_state(tmp_path)
+    state["memory_hits"] = [
+        MemoryHit(
+            record_id="dataset-record",
+            namespace="dataset:task_1",
+            score=1.0,
+            summary="File: stale.csv  Kind: csv  Columns: ['bad']",
+        ),
+        MemoryHit(
+            record_id="corpus-record",
+            namespace="corpus_task:task_1",
+            score=0.9,
+            summary="knowledge.md says inspect expense.csv first",
+        ),
+    ]
+
+    messages = _build_messages_for_state(state, default_app_config())
+    joined = _joined_content(messages)
+
+    assert "Dataset facts" not in joined
+    assert "stale.csv" not in joined
+    assert "Reference snippets" in joined
+    assert "expense.csv" in joined
