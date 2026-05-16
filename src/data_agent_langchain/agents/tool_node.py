@@ -38,6 +38,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +65,14 @@ _ERROR_KIND_MAP: dict[str, str] = {
     "timeout": "tool_timeout",
     "validation": "tool_validation",
     "runtime": "tool_error",
+}
+
+_KNOWN_PATH_ACTION_INPUTS: dict[str, str] = {
+    "execute_context_sql": "path",
+    "inspect_sqlite_schema": "path",
+    "read_csv": "path",
+    "read_doc": "path",
+    "read_json": "path",
 }
 
 
@@ -102,6 +111,25 @@ def tool_node(state: RunState, config: Any | None = None) -> dict[str, Any]:
     timeout_s = float(getattr(app_config.agent, "tool_timeout_s", 180.0))
     action_input = dict(state.get("action_input") or {})
 
+    known_path_failure = _known_path_failure_result(
+        state=state,
+        action=action,
+        action_input=action_input,
+        app_config=app_config,
+    )
+    if known_path_failure is not None:
+        dispatch_observability_event(
+            "tool_call",
+            {"tool": action, "step_index": int(state.get("step_index", 0) or 0), "ok": False},
+            config,
+        )
+        return {
+            "steps": [_step_record_from_result(state, action, action_input, known_path_failure)],
+            "last_tool_ok": False,
+            "last_tool_is_terminal": False,
+            "last_error_kind": _map_error_kind(known_path_failure),
+        }
+
     result: ToolRuntimeResult = call_tool_with_timeout(tool, action_input, timeout_s)
     dispatch_observability_event(
         "tool_call",
@@ -122,6 +150,7 @@ def tool_node(state: RunState, config: Any | None = None) -> dict[str, Any]:
     if result.ok:
         if action == "list_context":
             update["discovery_done"] = True
+            update["known_paths"] = _extract_known_paths(result.content)
         if action in DATA_PREVIEW_ACTIONS:
             update["preview_done"] = True
         memory_cfg = getattr(app_config, "memory", None)
@@ -159,6 +188,81 @@ def _safe_get_app_config() -> AppConfig:
         return get_current_app_config()
     except RuntimeError:
         return default_app_config()
+
+
+def _extract_known_paths(content: dict[str, Any]) -> list[str]:
+    entries = content.get("entries") if isinstance(content, Mapping) else None
+    if not isinstance(entries, list):
+        return []
+    paths: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        if entry.get("kind") != "file":
+            continue
+        path = entry.get("path")
+        if isinstance(path, str) and path.strip():
+            paths.add(_normalize_context_path(path))
+    return sorted(paths)
+
+
+def _known_path_failure_result(
+    *,
+    state: RunState,
+    action: str,
+    action_input: dict[str, Any],
+    app_config: AppConfig,
+) -> ToolRuntimeResult | None:
+    if not bool(getattr(app_config.agent, "enforce_known_path_only", False)):
+        return None
+    if not bool(state.get("discovery_done", False)):
+        return None
+    raw_known_paths = state.get("known_paths") or []
+    if not raw_known_paths:
+        return None
+    path_key = _KNOWN_PATH_ACTION_INPUTS.get(action)
+    if path_key is None:
+        return None
+    raw_path = action_input.get(path_key)
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return None
+    requested_path = _normalize_context_path(raw_path)
+    available_paths = sorted(
+        {
+            _normalize_context_path(path)
+            for path in raw_known_paths
+            if isinstance(path, str) and path.strip()
+        }
+    )
+    if requested_path in available_paths:
+        return None
+    return ToolRuntimeResult(
+        ok=False,
+        content={
+            "tool": action,
+            "error": _known_path_error_message(requested_path, available_paths),
+            "rejected_path": requested_path,
+            "available_paths": available_paths,
+            "validation": "known_path_only",
+        },
+        error_kind="validation",
+    )
+
+
+def _known_path_error_message(rejected_path: str, available_paths: list[str]) -> str:
+    available = ", ".join(available_paths) if available_paths else "(none)"
+    return (
+        f"Path '{rejected_path}' is not present in the current task context. "
+        f"Available files from list_context: {available}. "
+        f"Do not retry '{rejected_path}' unless a later list_context output shows it exists."
+    )
+
+
+def _normalize_context_path(path: str) -> str:
+    text = path.replace("\\", "/").strip()
+    while text.startswith("./"):
+        text = text[2:]
+    return text
 
 
 def _step_record_from_result(
