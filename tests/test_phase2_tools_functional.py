@@ -23,11 +23,8 @@ from __future__ import annotations
 import csv
 import json
 import sqlite3
-import tempfile
 import time
 from pathlib import Path
-
-import pytest
 
 from data_agent_langchain.benchmark.schema import AnswerTable, PublicTask, TaskAssets, TaskRecord
 from data_agent_langchain.tools.answer import AnswerTool

@@ -195,4 +195,3 @@ def test_render_corpus_snippets_keeps_policy_before_snippets_when_budget_is_tigh
     assert len(text) <= 260
     assert "Reference snippets" in text
     assert "not verified file inventory" in text
-
