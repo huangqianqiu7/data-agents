@@ -73,8 +73,7 @@ class AgentConfig:
       - 模型超时 ``120s`` / 工具超时 ``180s``
       - ``max_obs_chars=3000`` / ``max_context_tokens=24000``
 
-    LLM 身份字段（``model`` / ``api_base`` / ``api_key``）的取值协议
-    （详见 ``src/计划/统一配置/2026-05-09-统一配置参数-design-v4.md`` §4.2）：
+    LLM 身份字段（``model`` / ``api_base`` / ``api_key``）的取值协议：
 
       - **本地路径**（``load_app_config``）：YAML 显式非空值 > env vars
         （``MODEL_NAME`` / ``MODEL_API_URL`` / ``MODEL_API_KEY``）> dataclass

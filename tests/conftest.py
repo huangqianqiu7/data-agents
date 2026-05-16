@@ -32,6 +32,26 @@ _DEPRECATED = _SRC / "废弃"
 if _DEPRECATED.is_dir():
     sys.path.insert(0, str(_DEPRECATED))
 
+_LEGACY_ARCHIVE_TEST_FILES = {
+    "test_phase1_imports.py",
+    "test_phase1_parity_constants.py",
+    "test_phase25_working_memory.py",
+    "test_phase2_descriptions_parity.py",
+    "test_phase3_advance.py",
+    "test_phase3_finalize.py",
+    "test_phase3_gate.py",
+    "test_phase4_planner_node.py",
+    "test_phase5_runner_cli.py",
+}
+
+
+def pytest_ignore_collect(collection_path, config):
+    if _DEPRECATED.is_dir():
+        return None
+    if Path(str(collection_path)).name in _LEGACY_ARCHIVE_TEST_FILES:
+        return True
+    return None
+
 _PACKAGE_PREFIXES = ("data_agent_langchain",
                      "data_agent_common",
                      "data_agent_refactored",

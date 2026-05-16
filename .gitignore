@@ -26,6 +26,8 @@ htmlcov/
 # Local data, docs, tests, and artifacts
 data/
 docs/
+src/计划/
+src/废弃/
 # tests/  # 暂解除以便 Cascade 在 v5 计划下读取/编辑测试（TDD 用）
 evaluation/
 evaluation_report.csv
