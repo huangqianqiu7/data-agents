@@ -263,13 +263,31 @@ def test_execute_context_sql_missing_db_returns_validation_error(tmp_path):
     assert "Missing context asset" in result.content["error"]
 
 
-def test_execute_context_sql_schema_mismatch_remains_runtime_error(tmp_path):
+def test_execute_context_sql_schema_mismatch_returns_structured_missing_table(tmp_path):
     task = _make_task(tmp_path)
     tool = ExecuteContextSqlTool(task=task, runtime=_runtime_for(task))
     result = tool.invoke({"path": "data.sqlite", "sql": "SELECT * FROM missing_table"})
     assert not result.ok
     assert result.error_kind == "runtime"
+    assert result.content["sql_error_kind"] == "schema_mismatch"
+    assert result.content["missing_kind"] == "table"
+    assert result.content["missing_identifier"] == "missing_table"
+    assert result.content["path"] == "data.sqlite"
+    assert result.content["available_tables"] == ["players"]
     assert "missing_table" in result.content["error"]
+
+
+def test_execute_context_sql_schema_mismatch_returns_structured_missing_column(tmp_path):
+    task = _make_task(tmp_path)
+    tool = ExecuteContextSqlTool(task=task, runtime=_runtime_for(task))
+    result = tool.invoke({"path": "data.sqlite", "sql": "SELECT missing_col FROM players"})
+    assert not result.ok
+    assert result.error_kind == "runtime"
+    assert result.content["sql_error_kind"] == "schema_mismatch"
+    assert result.content["missing_kind"] == "column"
+    assert result.content["missing_identifier"] == "missing_col"
+    assert result.content["path"] == "data.sqlite"
+    assert result.content["available_tables"] == ["players"]
 
 
 def test_execute_context_sql_rejects_writes(tmp_path):
@@ -281,6 +299,7 @@ def test_execute_context_sql_rejects_writes(tmp_path):
     assert not result.ok
     assert result.error_kind == "runtime"
     assert "read-only" in result.content["error"].lower()
+    assert "sql_error_kind" not in result.content
 
 
 # ---------------------------------------------------------------------------
