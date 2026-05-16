@@ -38,6 +38,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -128,6 +129,25 @@ def tool_node(state: RunState, config: Any | None = None) -> dict[str, Any]:
             "last_tool_ok": False,
             "last_tool_is_terminal": False,
             "last_error_kind": _map_error_kind(known_path_failure),
+        }
+
+    sql_schema_loop_failure = _sql_schema_loop_failure_result(
+        state=state,
+        action=action,
+        action_input=action_input,
+        app_config=app_config,
+    )
+    if sql_schema_loop_failure is not None:
+        dispatch_observability_event(
+            "tool_call",
+            {"tool": action, "step_index": int(state.get("step_index", 0) or 0), "ok": False},
+            config,
+        )
+        return {
+            "steps": [_step_record_from_result(state, action, action_input, sql_schema_loop_failure)],
+            "last_tool_ok": False,
+            "last_tool_is_terminal": False,
+            "last_error_kind": _map_error_kind(sql_schema_loop_failure),
         }
 
     result: ToolRuntimeResult = call_tool_with_timeout(tool, action_input, timeout_s)
@@ -255,6 +275,130 @@ def _known_path_error_message(rejected_path: str, available_paths: list[str]) ->
         f"Path '{rejected_path}' is not present in the current task context. "
         f"Available files from list_context: {available}. "
         f"Do not retry '{rejected_path}' unless a later list_context output shows it exists."
+    )
+
+
+def _sql_schema_loop_failure_result(
+    *,
+    state: RunState,
+    action: str,
+    action_input: dict[str, Any],
+    app_config: AppConfig,
+) -> ToolRuntimeResult | None:
+    if action != "execute_context_sql":
+        return None
+    retry_limit = getattr(app_config.agent, "sql_schema_mismatch_retry_limit", 0)
+    if retry_limit is None or int(retry_limit) <= 0:
+        return None
+    raw_path = action_input.get("path")
+    sql = action_input.get("sql")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return None
+    if not isinstance(sql, str) or not sql.strip():
+        return None
+    current_path = _normalize_context_path(raw_path)
+    mismatches: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for step in state.get("steps") or []:
+        if _step_value(step, "action") != "execute_context_sql":
+            continue
+        step_action_input = _step_value(step, "action_input")
+        if not isinstance(step_action_input, Mapping):
+            continue
+        prior_path = step_action_input.get("path")
+        if not isinstance(prior_path, str):
+            continue
+        if _normalize_context_path(prior_path) != current_path:
+            continue
+        observation = _step_value(step, "observation")
+        if not isinstance(observation, Mapping):
+            continue
+        content = observation.get("content")
+        if not isinstance(content, Mapping):
+            continue
+        if content.get("validation") == "sql_schema_loop_guard":
+            continue
+        if content.get("sql_error_kind") != "schema_mismatch":
+            continue
+        missing_kind = content.get("missing_kind")
+        missing_identifier = content.get("missing_identifier")
+        if missing_kind not in {"table", "column"}:
+            continue
+        if not isinstance(missing_identifier, str) or not missing_identifier.strip():
+            continue
+        key = (current_path, str(missing_kind), missing_identifier.casefold())
+        record = mismatches.setdefault(
+            key,
+            {
+                "count": 0,
+                "missing_kind": str(missing_kind),
+                "missing_identifier": missing_identifier,
+                "available_tables": content.get("available_tables", []),
+            },
+        )
+        record["count"] += 1
+        if isinstance(content.get("available_tables"), list):
+            record["available_tables"] = content.get("available_tables")
+    for record in mismatches.values():
+        if record["count"] < int(retry_limit):
+            continue
+        missing_kind = record["missing_kind"]
+        missing_identifier = record["missing_identifier"]
+        if not _sql_references_missing_identifier(sql, missing_kind, missing_identifier):
+            continue
+        available_tables = record["available_tables"] if isinstance(record["available_tables"], list) else []
+        return ToolRuntimeResult(
+            ok=False,
+            content={
+                "tool": action,
+                "error": _sql_schema_loop_error_message(current_path, missing_kind, missing_identifier),
+                "validation": "sql_schema_loop_guard",
+                "path": current_path,
+                "missing_kind": missing_kind,
+                "missing_identifier": missing_identifier,
+                "available_tables": available_tables,
+                "retry_limit": int(retry_limit),
+            },
+            error_kind="validation",
+        )
+    return None
+
+
+def _step_value(step: Any, name: str) -> Any:
+    if isinstance(step, Mapping):
+        return step.get(name)
+    return getattr(step, name, None)
+
+
+def _sql_references_missing_identifier(sql: str, missing_kind: str, identifier: str) -> bool:
+    if missing_kind == "table":
+        return _sql_references_table(sql, identifier)
+    return _sql_references_token(sql, identifier)
+
+
+def _sql_references_table(sql: str, identifier: str) -> bool:
+    ident = re.escape(identifier)
+    pattern = re.compile(
+        rf'\b(?:from|join)\s+(?:["`]{ident}["`]|\[{ident}\]|{ident})(?![A-Za-z0-9_])',
+        re.IGNORECASE,
+    )
+    return bool(pattern.search(sql))
+
+
+def _sql_references_token(sql: str, identifier: str) -> bool:
+    identifiers = [identifier]
+    if "." in identifier:
+        identifiers.append(identifier.rsplit(".", 1)[-1])
+    for item in identifiers:
+        token = re.escape(item)
+        if re.search(rf"(?<![A-Za-z0-9_]){token}(?![A-Za-z0-9_])", sql, re.IGNORECASE):
+            return True
+    return False
+
+
+def _sql_schema_loop_error_message(path: str, missing_kind: str, missing_identifier: str) -> str:
+    return (
+        f"Repeated SQL schema mismatch: {missing_kind} '{missing_identifier}' is not available in {path}. "
+        "Do not retry SQL referencing this identifier. Use inspect_sqlite_schema results and query only available tables."
     )
 
 
