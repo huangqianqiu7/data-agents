@@ -120,6 +120,7 @@ class AgentConfig:
     # ----- 发现 / 已知路径（parity 默认 OFF，v2 C13） -----
     enforce_discovery_gate: bool = False
     enforce_known_path_only: bool = False
+    sql_schema_mismatch_retry_limit: int | None = 0
 
     # ----- 决定性（reproducible 模式必填） -----
     seed: int | None = None

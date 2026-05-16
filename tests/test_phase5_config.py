@@ -109,6 +109,31 @@ def test_agent_config_defaults_to_tool_calling_after_gateway_smoke():
     assert default_app_config().agent.action_mode == "tool_calling"
 
 
+def test_agent_config_sql_schema_mismatch_retry_limit_defaults_disabled():
+    assert AgentConfig().sql_schema_mismatch_retry_limit == 0
+
+
+def test_load_app_config_yaml_overrides_sql_schema_mismatch_retry_limit(tmp_path: Path):
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "agent:\n  sql_schema_mismatch_retry_limit: 2\n",
+        encoding="utf-8",
+    )
+
+    cfg = load_app_config(cfg_path)
+
+    assert cfg.agent.sql_schema_mismatch_retry_limit == 2
+
+
+def test_app_config_round_trip_preserves_sql_schema_mismatch_retry_limit(tmp_path: Path):
+    cfg = AppConfig(
+        dataset=DatasetConfig(root_path=tmp_path / "input"),
+        agent=AgentConfig(sql_schema_mismatch_retry_limit=2),
+    )
+
+    assert AppConfig.from_dict(cfg.to_dict()) == cfg
+
+
 def test_run_config_task_timeout_seconds_default_is_900():
     """2026-05-15 P1 §1 followup 回归：``task_timeout_seconds`` 从 600 提升到 900。
 
