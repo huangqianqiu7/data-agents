@@ -5,6 +5,7 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage
 
 from data_agent_langchain.agents.model_node import _build_messages_for_state
+from data_agent_langchain.agents.prompts import render_corpus_snippets, render_dataset_facts
 from data_agent_langchain.config import MemoryConfig, default_app_config
 from data_agent_langchain.memory.types import MemoryHit
 
@@ -134,3 +135,64 @@ def test_build_messages_keeps_corpus_snippets_when_dataset_facts_disabled(tmp_pa
     assert "stale.csv" not in joined
     assert "Reference snippets" in joined
     assert "expense.csv" in joined
+
+
+def test_render_dataset_facts_marks_prior_run_facts_as_stale():
+    text = render_dataset_facts(
+        [
+            MemoryHit(
+                record_id="record-a",
+                namespace="dataset:task_1",
+                score=1.0,
+                summary="File: a.csv  Kind: csv  Columns: ['a']",
+            )
+        ]
+    )
+
+    assert "Dataset facts" in text
+    assert "prior runs" in text
+    assert "may be stale" in text
+    assert "not the current task file inventory" in text
+    assert "list_context" in text
+    assert "Current tool observations override" in text
+    assert "a.csv" in text
+
+
+def test_render_corpus_snippets_marks_snippets_as_references_not_inventory():
+    text = render_corpus_snippets(
+        [
+            MemoryHit(
+                record_id="corpus-record",
+                namespace="corpus_task:task_1",
+                score=0.9,
+                summary="knowledge.md says inspect expense.csv first",
+            )
+        ],
+        budget_chars=500,
+    )
+
+    assert "Reference snippets" in text
+    assert "task documentation references" in text
+    assert "not verified file inventory or schema" in text
+    assert "list_context" in text
+    assert "tool observations override" in text
+    assert "expense.csv" in text
+
+
+def test_render_corpus_snippets_keeps_policy_before_snippets_when_budget_is_tight():
+    text = render_corpus_snippets(
+        [
+            MemoryHit(
+                record_id="corpus-record",
+                namespace="corpus_task:task_1",
+                score=0.9,
+                summary="x" * 1000,
+            )
+        ],
+        budget_chars=260,
+    )
+
+    assert len(text) <= 260
+    assert "Reference snippets" in text
+    assert "not verified file inventory" in text
+

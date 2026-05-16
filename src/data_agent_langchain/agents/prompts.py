@@ -224,6 +224,21 @@ def build_planning_messages(
 
 # 历史 re-export：保留这些常量名以兼容现有 ``from agents.prompts import REACT_SYSTEM_PROMPT``
 # 风格的调用点；新代码请直接 ``from agents.prompt_strings import ...``。
+_DATASET_FACTS_POLICY = (
+    "These facts are recalled from prior runs and may be stale. "
+    "They are not the current task file inventory. "
+    "Do not use paths from this section unless they are verified by the current task's "
+    "list_context output. Current tool observations override these facts."
+)
+
+_CORPUS_SNIPPETS_POLICY = (
+    "These snippets are task documentation references. "
+    "They are not verified file inventory or schema. "
+    "Use current list_context and tool observations as the source of truth; "
+    "current tool observations override these snippets."
+)
+
+
 def render_dataset_facts(hits: list[MemoryHit]) -> str:
     """Render MemoryHit summaries into a whitelisted prompt fragment.
 
@@ -232,7 +247,10 @@ def render_dataset_facts(hits: list[MemoryHit]) -> str:
     """
     if not hits:
         return ""
-    lines = ["## Dataset facts (from prior runs, informational only)"]
+    lines = [
+        "## Dataset facts (from prior runs, informational only)",
+        _DATASET_FACTS_POLICY,
+    ]
     for hit in hits:
         lines.append(f"- {hit.summary}")
     return "\n".join(lines)
@@ -244,10 +262,11 @@ def render_corpus_snippets(hits: list[MemoryHit], *, budget_chars: int) -> str:
         return ""
 
     header = "## Reference snippets (from task documentation)"
-    if len(header) >= budget_chars:
-        return _truncate_prompt_fragment(header, budget_chars)
+    base = f"{header}\n{_CORPUS_SNIPPETS_POLICY}"
+    if len(base) >= budget_chars:
+        return _truncate_prompt_fragment(base, budget_chars)
 
-    text = header
+    text = base
     for hit in hits:
         line = f"- {hit.summary}"
         remaining = budget_chars - len(text) - 1
