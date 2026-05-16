@@ -304,6 +304,16 @@ RAG 提交镜像使用 `docker/Dockerfile.rag`：build 阶段会联网下载
 阶段默认设置 `HF_HOME=/opt/models/hf`、`HF_HUB_OFFLINE=1` 与
 `TRANSFORMERS_OFFLINE=1`，因此评测节点不需要访问 HuggingFace。
 
+#### RAG / memory guard 当前状态
+
+当前 RAG / memory 相关的确定性循环保护分为两层，均默认保持保守行为：
+
+- `memory.inject_dataset_facts=False`：默认不把 prior-run dataset facts 注入 prompt，避免裸 `dataset:input` 记忆把其它任务的 stale path 当作当前任务文件。
+- `agent.enforce_known_path_only=False`：默认关闭；实验开启后，`list_context` 成功发现的当前任务文件会成为 `read_csv` / `read_json` / `read_doc` / `inspect_sqlite_schema` / `execute_context_sql` 的路径硬约束。
+- `agent.sql_schema_mismatch_retry_limit=0`：默认关闭；实验建议设为 `2`，表示允许同一 SQLite `no such table` / `no such column` 真实失败两次，第三次仍引用同一缺失 identifier 时由 `tool_node` 在调用工具前拦截。
+
+第二轮 schema-loop 验证中，`task_408` 在显式开启 `sql_schema_mismatch_retry_limit=2` 的本地实验配置下成功，`execute_context_sql` 从 full benchmark variant 的 `56` 次降到 `8` 次，`no such table: races` 从 `42` 次降到 `1` 次。默认值仍为关闭，便于保持 parity 与逐项归因。
+
 ### 6. 跑整套 benchmark
 
 ```bash
@@ -352,7 +362,7 @@ dabench-lc run-benchmark --config configs/local.yaml --graph-mode plan_solve --m
 | --- | --- | --- |
 | `DatasetConfig` | `root_path` | 数据集根路径；图节点只看到字符串副本 |
 | `ToolsConfig` | `python_timeout_s=30.0` / `sql_row_limit=200` | `execute_python` 沙箱超时、SQL 默认行数上限 |
-| `AgentConfig` | `model` / `api_base` / `api_key` / `temperature` / `max_steps=60` / `max_replans=4` / `max_gate_retries=4` / `action_mode="tool_calling"` / `model_timeout_s=120` / `tool_timeout_s=180` / `max_model_retries=6` / `max_obs_chars=3000` / `max_context_tokens=24000` / `seed` 等 | 主循环、超时、上下文预算、决定性 |
+| `AgentConfig` | `model` / `api_base` / `api_key` / `temperature` / `max_steps=60` / `max_replans=4` / `max_gate_retries=4` / `action_mode="tool_calling"` / `model_timeout_s=120` / `tool_timeout_s=180` / `max_model_retries=6` / `max_obs_chars=3000` / `max_context_tokens=24000` / `enforce_known_path_only=False` / `sql_schema_mismatch_retry_limit=0` / `seed` 等 | 主循环、超时、上下文预算、路径约束、SQL schema-loop guard、决定性 |
 | `RunConfig` | `output_dir` / `run_id` / `max_workers=5` / `task_timeout_seconds=900` | runner 与子进程参数（2026-05-15 P1 §1: 600→900 给 PS_on LLM gateway 慢路径留余量） |
 | `ObservabilityConfig` | `langsmith_enabled=False` / `gateway_caps_path` | LangSmith 与 caps 文件位置 |
 | `EvaluationConfig` | `reproducible=False` | `reproducible=true` 时强制 `agent.seed` 已设并禁 LangSmith（v4 E5） |
